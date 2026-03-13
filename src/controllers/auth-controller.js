@@ -1,0 +1,97 @@
+const jwt = require('jsonwebtoken')
+
+const { User } = require('../schemas/user')
+const { hashPassword, verifyPassword } = require('../utils/password')
+const { requireEnv } = require('../utils/require-env')
+
+async function register(req, res) {
+  const { email, password, name, role, shopIds } = req.body ?? {}
+
+  if (!email || !password || !name) {
+    return res.status(400).json({ error: 'email, password, and name are required' })
+  }
+
+  const existing = await User.findOne({ email }).lean()
+  if (existing) {
+    return res.status(409).json({ error: 'Email already exists' })
+  }
+
+  const passwordHash = await hashPassword(password)
+  const user = await User.create({
+    email,
+    passwordHash,
+    name,
+    role: role ?? 'cashier',
+    shopIds: Array.isArray(shopIds) ? shopIds : [],
+    isActive: true,
+  })
+
+  res.status(201).json({
+    id: String(user._id),
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    shopIds: user.shopIds,
+    isActive: user.isActive !== false,
+  })
+}
+
+async function login(req, res) {
+  const { email, password } = req.body ?? {}
+  if (!email || !password) {
+    return res.status(400).json({ error: 'email and password are required' })
+  }
+
+  const user = await User.findOne({ email })
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid email or password' })
+  }
+  if (user.isActive === false) {
+    return res.status(403).json({ error: 'Account disabled' })
+  }
+
+  const ok = await verifyPassword(password, user.passwordHash)
+  if (!ok) {
+    return res.status(401).json({ error: 'Invalid email or password' })
+  }
+
+  const jwtSecret = requireEnv('JWT_SECRET')
+  const token = jwt.sign(
+    { sub: String(user._id), role: user.role, shopIds: user.shopIds },
+    jwtSecret,
+    { expiresIn: '7d' },
+  )
+
+  res.status(200).json({
+    token,
+    user: {
+      id: String(user._id),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      shopIds: user.shopIds,
+      isActive: user.isActive !== false,
+    },
+  })
+}
+
+async function me(req, res) {
+  const user = await User.findById(req.user.sub).lean()
+  if (!user) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  res.status(200).json({
+    user: {
+      id: String(user._id),
+      email: user.email,
+      name: user.name,
+      role: user.role,
+      shopIds: user.shopIds,
+      isActive: user.isActive !== false,
+    },
+  })
+}
+
+module.exports = { register, login, me }
+
