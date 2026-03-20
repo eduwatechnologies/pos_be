@@ -8,6 +8,29 @@ const shopSchema = new mongoose.Schema(
     businessLogoUrl: { type: String, default: null },
     address: { type: String, default: null },
     phone: { type: String, default: null },
+    rolePermissions: {
+      type: Object,
+      default: () => ({
+        admin: {
+          dashboard: true,
+          terminal: true,
+          receipts: true,
+          analytics: true,
+          inventory: true,
+          employees: true,
+          settings: true,
+        },
+        cashier: {
+          dashboard: true,
+          terminal: true,
+          receipts: true,
+          analytics: false,
+          inventory: false,
+          employees: false,
+          settings: false,
+        },
+      }),
+    },
   },
   { timestamps: true },
 )

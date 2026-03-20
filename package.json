@@ -5,7 +5,9 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "seed:admin": "node src/seeds/admin.js",
+    "seed:products": "node src/seeds/products.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

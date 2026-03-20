@@ -127,10 +127,6 @@ async function getReceipt(req, res) {
 }
 
 async function refundReceipt(req, res) {
-  if (req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Forbidden' })
-  }
-
   const shopId = req.params.shopId
   const receiptId = req.params.receiptId
   if (!objectIdRe.test(receiptId)) {
@@ -163,4 +159,3 @@ async function refundReceipt(req, res) {
 }
 
 module.exports = { listReceipts, createReceipt, getReceipt, refundReceipt }
-

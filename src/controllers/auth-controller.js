@@ -1,39 +1,69 @@
 const jwt = require('jsonwebtoken')
 
+const { Shop } = require('../schemas/shop')
 const { User } = require('../schemas/user')
 const { hashPassword, verifyPassword } = require('../utils/password')
 const { requireEnv } = require('../utils/require-env')
 
 async function register(req, res) {
-  const { email, password, name, role, shopIds } = req.body ?? {}
+  const { email, password, name, shopName, currency } = req.body ?? {}
 
   if (!email || !password || !name) {
     return res.status(400).json({ error: 'email, password, and name are required' })
   }
 
-  const existing = await User.findOne({ email }).lean()
-  if (existing) {
+  const normalizedEmail = String(email).toLowerCase().trim()
+  const normalizedName = String(name).trim()
+  const normalizedShopName = (shopName ? String(shopName).trim() : '') || `${normalizedName}'s Shop`
+
+  const existingNormalized = await User.findOne({ email: normalizedEmail }).lean()
+  if (existingNormalized) {
     return res.status(409).json({ error: 'Email already exists' })
   }
 
-  const passwordHash = await hashPassword(password)
-  const user = await User.create({
-    email,
-    passwordHash,
-    name,
-    role: role ?? 'cashier',
-    shopIds: Array.isArray(shopIds) ? shopIds : [],
-    isActive: true,
+  const shop = await Shop.create({
+    name: normalizedShopName,
+    currency: (currency ? String(currency).trim() : '') || 'NGN',
   })
 
-  res.status(201).json({
-    id: String(user._id),
-    email: user.email,
-    name: user.name,
-    role: user.role,
-    shopIds: user.shopIds,
-    isActive: user.isActive !== false,
-  })
+  try {
+    const passwordHash = await hashPassword(password)
+    const user = await User.create({
+      email: normalizedEmail,
+      passwordHash,
+      name: normalizedName,
+      role: 'admin',
+      shopIds: [String(shop._id)],
+      isActive: true,
+    })
+
+    const jwtSecret = requireEnv('JWT_SECRET')
+    const token = jwt.sign(
+      { sub: String(user._id), role: user.role, shopIds: user.shopIds },
+      jwtSecret,
+      { expiresIn: '7d' },
+    )
+
+    return res.status(201).json({
+      token,
+      user: {
+        id: String(user._id),
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        shopIds: user.shopIds,
+        isActive: user.isActive !== false,
+      },
+      shop: {
+        id: String(shop._id),
+        name: shop.name,
+        currency: shop.currency,
+      },
+    })
+  } catch (err) {
+    await Shop.findByIdAndDelete(shop._id)
+    throw err
+  }
 }
 
 async function login(req, res) {
@@ -94,4 +124,3 @@ async function me(req, res) {
 }
 
 module.exports = { register, login, me }
-

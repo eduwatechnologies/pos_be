@@ -4,7 +4,7 @@ const { User } = require('../schemas/user')
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 
 async function listShops(req, res) {
-  if (req.user.role === 'admin') {
+  if (req.user.role === 'super_admin') {
     const items = await Shop.find({}).sort({ createdAt: -1 }).limit(200).lean()
     return res.status(200).json({ items })
   }
@@ -21,7 +21,7 @@ async function listShops(req, res) {
 }
 
 async function createShop(req, res) {
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'super_admin') {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
@@ -50,7 +50,7 @@ async function getShop(req, res) {
     return res.status(400).json({ error: 'Invalid shopId' })
   }
 
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'super_admin') {
     const shopIds = Array.isArray(req.user.shopIds) ? req.user.shopIds : []
     if (!shopIds.includes(shopId)) {
       return res.status(403).json({ error: 'Forbidden' })
@@ -65,7 +65,7 @@ async function getShop(req, res) {
 }
 
 async function updateShop(req, res) {
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'super_admin') {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
@@ -89,7 +89,7 @@ async function updateShop(req, res) {
 }
 
 async function deleteShop(req, res) {
-  if (req.user.role !== 'admin') {
+  if (req.user.role !== 'super_admin') {
     return res.status(403).json({ error: 'Forbidden' })
   }
 
@@ -109,4 +109,3 @@ async function deleteShop(req, res) {
 }
 
 module.exports = { listShops, createShop, getShop, updateShop, deleteShop }
-
