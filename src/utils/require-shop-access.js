@@ -1,5 +1,52 @@
 const { Shop } = require('../schemas/shop')
 
+function normalizeRolePermissions(input) {
+  const defaults = {
+    admin: {
+      dashboard: true,
+      terminal: true,
+      customers: true,
+      receipts: true,
+      analytics: true,
+      inventory: true,
+      employees: true,
+      settings: true,
+    },
+    cashier: {
+      dashboard: true,
+      terminal: true,
+      customers: false,
+      receipts: true,
+      analytics: false,
+      inventory: false,
+      employees: false,
+      settings: false,
+    },
+  }
+
+  const allowedKeys = ['dashboard', 'terminal', 'customers', 'receipts', 'analytics', 'inventory', 'employees', 'settings']
+
+  const src = input && typeof input === 'object' ? input : {}
+  const out = {}
+
+  for (const [role, roleObj] of Object.entries(src)) {
+    if (!roleObj || typeof roleObj !== 'object') continue
+    if (role === 'admin') continue
+    if (role === 'super_admin') continue
+
+    const base = role === 'cashier' ? { ...defaults.cashier } : Object.fromEntries(allowedKeys.map((k) => [k, true]))
+    for (const key of allowedKeys) {
+      if (key in roleObj) base[key] = Boolean(roleObj[key])
+    }
+    out[role] = base
+  }
+
+  out.cashier = { ...defaults.cashier, ...(out.cashier ?? {}) }
+  out.admin = { ...defaults.admin }
+
+  return out
+}
+
 function requireShopAccess(req, res, next) {
   const shopId = req.params.shopId
   const user = req.user
@@ -46,7 +93,7 @@ function requireShopPermission(permissionKey) {
       return res.status(404).json({ error: 'Not found' })
     }
 
-    const rolePermissions = shop?.rolePermissions && typeof shop.rolePermissions === 'object' ? shop.rolePermissions : {}
+    const rolePermissions = normalizeRolePermissions(shop?.rolePermissions)
     const roleKey = String(user.role ?? '')
     const keys = Array.isArray(permissionKey) ? permissionKey : [permissionKey]
     const allowed = keys.some((k) => Boolean(rolePermissions?.[roleKey]?.[k]))

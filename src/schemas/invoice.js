@@ -13,6 +13,9 @@ const invoiceSchema = new mongoose.Schema(
     currency: { type: String, default: 'NGN' },
     amount: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['unpaid', 'paid', 'void'], default: 'unpaid', index: true },
+    paymentProvider: { type: String, default: null, index: true },
+    paymentReference: { type: String, default: null, index: true },
+    paymentMetadata: { type: mongoose.Schema.Types.Mixed, default: null },
     periodStart: { type: Date, required: true },
     periodEnd: { type: Date, required: true },
     dueDate: { type: Date, required: true },
@@ -27,4 +30,3 @@ invoiceSchema.index({ shopId: 1, status: 1, createdAt: -1 })
 const Invoice = mongoose.models.Invoice ?? mongoose.model('Invoice', invoiceSchema)
 
 module.exports = { Invoice }
-

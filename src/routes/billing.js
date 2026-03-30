@@ -15,5 +15,6 @@ billingRouter.patch('/subscriptions/:subscriptionId', requireAuth, billingContro
 billingRouter.get('/invoices', requireAuth, billingController.listInvoices)
 billingRouter.post('/invoices/:invoiceId/pay', requireAuth, billingController.markInvoicePaid)
 
-module.exports = { billingRouter }
+billingRouter.post('/paystack/webhook', billingController.paystackWebhook)
 
+module.exports = { billingRouter }

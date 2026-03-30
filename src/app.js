@@ -30,7 +30,14 @@ function createApp() {
   app.use(helmet())
   app.use(cors(corsOptions))
   app.options('*', cors(corsOptions))
-  app.use(express.json({ limit: '2mb' }))
+  app.use(
+    express.json({
+      limit: '2mb',
+      verify: (req, _res, buf) => {
+        req.rawBody = buf
+      },
+    }),
+  )
   app.use(morgan('dev'))
 
   app.get('/health', (_req, res) => {

@@ -17,9 +17,15 @@ async function listEmployees(req, res) {
 
 async function createEmployee(req, res) {
   const shopId = req.params.shopId
-  const { email, password, name, role } = req.body ?? {}
+  const { email, password, name, role, salaryOrWage } = req.body ?? {}
 
   if (!email || !password || !name) {
+    return res.status(400).json({ error: 'email, password, and name are required' })
+  }
+
+  const normalizedEmail = String(email).toLowerCase().trim()
+  const normalizedName = String(name).trim()
+  if (!normalizedEmail || !normalizedName) {
     return res.status(400).json({ error: 'email, password, and name are required' })
   }
 
@@ -37,19 +43,25 @@ async function createEmployee(req, res) {
     return res.status(400).json({ error: 'Unknown role' })
   }
 
-  const existing = await User.findOne({ email }).lean()
+  const parsedSalaryOrWage = salaryOrWage == null ? 0 : Number(salaryOrWage)
+  if (!Number.isFinite(parsedSalaryOrWage) || parsedSalaryOrWage < 0) {
+    return res.status(400).json({ error: 'salaryOrWage must be a non-negative number' })
+  }
+
+  const existing = await User.findOne({ email: normalizedEmail }).lean()
   if (existing) {
     return res.status(409).json({ error: 'Email already exists' })
   }
 
   const passwordHash = await hashPassword(password)
   const user = await User.create({
-    email,
+    email: normalizedEmail,
     passwordHash,
-    name,
+    name: normalizedName,
     role: requestedRole,
     shopIds: [shopId],
     isActive: true,
+    salaryOrWage: parsedSalaryOrWage,
   })
 
   res.status(201).json({
@@ -60,6 +72,7 @@ async function createEmployee(req, res) {
       role: user.role,
       shopIds: user.shopIds,
       isActive: user.isActive !== false,
+      salaryOrWage: user.salaryOrWage,
     },
   })
 }
@@ -88,9 +101,29 @@ async function updateEmployee(req, res) {
   }
 
   const updates = {}
-  const allowed = ['name', 'email', 'role']
+  const allowed = ['name', 'email', 'role', 'salaryOrWage']
   for (const key of allowed) {
     if (key in (req.body ?? {})) updates[key] = req.body[key]
+  }
+
+  if ('name' in updates) {
+    const normalizedName = String(updates.name ?? '').trim()
+    if (!normalizedName) {
+      return res.status(400).json({ error: 'name is required' })
+    }
+    updates.name = normalizedName
+  }
+
+  if ('email' in updates) {
+    const normalizedEmail = String(updates.email ?? '').toLowerCase().trim()
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: 'email is required' })
+    }
+    const existing = await User.findOne({ email: normalizedEmail, _id: { $ne: employeeId } }).select({ _id: 1 }).lean()
+    if (existing) {
+      return res.status(409).json({ error: 'Email already exists' })
+    }
+    updates.email = normalizedEmail
   }
 
   if ('role' in updates) {
@@ -105,6 +138,14 @@ async function updateEmployee(req, res) {
       return res.status(400).json({ error: 'Invalid role' })
     }
     updates.role = requestedRole
+  }
+
+  if ('salaryOrWage' in updates) {
+    const parsedSalaryOrWage = Number(updates.salaryOrWage)
+    if (!Number.isFinite(parsedSalaryOrWage) || parsedSalaryOrWage < 0) {
+      return res.status(400).json({ error: 'salaryOrWage must be a non-negative number' })
+    }
+    updates.salaryOrWage = parsedSalaryOrWage
   }
 
   const item = await User.findOneAndUpdate(
@@ -163,6 +204,35 @@ async function setEmployeeStatus(req, res) {
   res.status(200).json({ item })
 }
 
+async function setEmployeePassword(req, res) {
+  const shopId = req.params.shopId
+  const employeeId = req.params.employeeId
+  if (!objectIdRe.test(employeeId)) {
+    return res.status(400).json({ error: 'Invalid employeeId' })
+  }
+
+  const { password } = req.body ?? {}
+  const nextPassword = String(password ?? '')
+  if (!nextPassword) {
+    return res.status(400).json({ error: 'password is required' })
+  }
+
+  const passwordHash = await hashPassword(nextPassword)
+  const updated = await User.findOneAndUpdate(
+    { _id: employeeId, shopIds: shopId, role: { $nin: protectedRoles } },
+    { $set: { passwordHash } },
+    { new: true },
+  )
+    .select({ _id: 1 })
+    .lean()
+
+  if (!updated) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  return res.status(200).json({ ok: true })
+}
+
 module.exports = {
   listEmployees,
   createEmployee,
@@ -170,4 +240,5 @@ module.exports = {
   updateEmployee,
   deleteEmployee,
   setEmployeeStatus,
+  setEmployeePassword,
 }

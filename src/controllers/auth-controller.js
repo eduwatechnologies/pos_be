@@ -72,7 +72,8 @@ async function login(req, res) {
     return res.status(400).json({ error: 'email and password are required' })
   }
 
-  const user = await User.findOne({ email })
+  const normalizedEmail = String(email).toLowerCase().trim()
+  const user = await User.findOne({ email: normalizedEmail })
   if (!user) {
     return res.status(401).json({ error: 'Invalid email or password' })
   }

@@ -18,4 +18,6 @@ employeesRouter.delete('/:employeeId', requireAuth, requireShopAccess, requireSh
 
 employeesRouter.patch('/:employeeId/status', requireAuth, requireShopAccess, requireShopPermission('employees'), employeesController.setEmployeeStatus)
 
+employeesRouter.patch('/:employeeId/password', requireAuth, requireShopAccess, requireShopPermission('employees'), employeesController.setEmployeePassword)
+
 module.exports = { employeesRouter }

@@ -21,7 +21,7 @@ async function listShops(req, res) {
 }
 
 async function createShop(req, res) {
-  if (req.user.role !== 'super_admin') {
+  if (req.user.role !== 'super_admin' && req.user.role !== 'admin') {
     return res.status(403).json({ error: 'Forbidden' })
   }
 

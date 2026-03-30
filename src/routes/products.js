@@ -12,6 +12,14 @@ productsRouter.post('/', requireAuth, requireShopAccess, requireShopPermission('
 
 productsRouter.get('/:productId', requireAuth, requireShopAccess, requireShopPermission(['inventory', 'terminal']), productsController.getProduct)
 
+productsRouter.get(
+  '/:productId/detail',
+  requireAuth,
+  requireShopAccess,
+  requireShopPermission(['inventory', 'terminal']),
+  productsController.getProductDetail,
+)
+
 productsRouter.patch('/:productId', requireAuth, requireShopAccess, requireShopPermission('inventory'), productsController.updateProduct)
 
 productsRouter.delete('/:productId', requireAuth, requireShopAccess, requireShopPermission('inventory'), productsController.deleteProduct)

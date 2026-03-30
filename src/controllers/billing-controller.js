@@ -2,6 +2,9 @@ const { SubscriptionPlan } = require('../schemas/subscription-plan')
 const { StoreSubscription } = require('../schemas/store-subscription')
 const { Invoice } = require('../schemas/invoice')
 const { Shop } = require('../schemas/shop')
+const { User } = require('../schemas/user')
+const { requireEnv } = require('../utils/require-env')
+const crypto = require('crypto')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 
@@ -200,6 +203,213 @@ async function markInvoicePaid(req, res) {
   res.status(200).json({ item })
 }
 
+async function listShopPlans(req, res) {
+  const items = await SubscriptionPlan.find({ isActive: true }).sort({ priceMonthly: 1, createdAt: -1 }).limit(200).lean()
+  res.status(200).json({ items })
+}
+
+async function getShopSubscription(req, res) {
+  const shopId = req.params.shopId
+  const item = await StoreSubscription.findOne({ shopId: String(shopId), status: { $in: ['active', 'past_due', 'canceled'] } })
+    .sort({ createdAt: -1 })
+    .lean()
+  res.status(200).json({ item: item ?? null })
+}
+
+function computeNextPeriod(subscription) {
+  const now = new Date()
+  const base = subscription?.currentPeriodEnd && new Date(subscription.currentPeriodEnd).getTime() > now.getTime()
+    ? new Date(subscription.currentPeriodEnd)
+    : now
+  const periodStart = base
+  const periodEnd = new Date(base.getTime() + 30 * 24 * 60 * 60 * 1000)
+  return { now, periodStart, periodEnd }
+}
+
+async function initializePaystackPayment(req, res) {
+  const shopId = req.params.shopId
+  const { planId, redirectUrl } = req.body ?? {}
+
+  if (!planId) return res.status(400).json({ error: 'planId is required' })
+  if (!objectIdRe.test(String(planId))) return res.status(400).json({ error: 'Invalid planId' })
+
+  const shop = await Shop.findById(String(shopId)).lean()
+  if (!shop) return res.status(404).json({ error: 'Shop not found' })
+
+  const plan = await SubscriptionPlan.findById(String(planId)).lean()
+  if (!plan || plan.isActive === false) return res.status(404).json({ error: 'Plan not found' })
+
+  const user = await User.findById(req.user.sub).select({ email: 1 }).lean()
+  const email = user?.email ? String(user.email) : ''
+  if (!email) return res.status(400).json({ error: 'User email is required' })
+
+  const existing = await StoreSubscription.findOne({
+    shopId: String(shopId),
+    status: { $in: ['active', 'past_due'] },
+  })
+    .sort({ createdAt: -1 })
+    .lean()
+
+  const subscription =
+    existing ??
+    (await StoreSubscription.create({
+      shopId: String(shopId),
+      planId: String(planId),
+      status: 'past_due',
+      currentPeriodStart: new Date(),
+      currentPeriodEnd: new Date(),
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+    }))
+
+  const { now, periodStart, periodEnd } = computeNextPeriod(subscription)
+
+  const amount = Number(plan.priceMonthly ?? 0)
+  if (!Number.isFinite(amount) || amount < 0) return res.status(400).json({ error: 'Invalid plan price' })
+
+  const reference = `BSCAN_${crypto.randomBytes(12).toString('hex')}`.toUpperCase()
+  const invoice = await Invoice.create({
+    shopId: String(shopId),
+    subscriptionId: String(subscription._id),
+    planId: String(planId),
+    currency: String(plan.currency ?? 'NGN'),
+    amount,
+    status: 'unpaid',
+    paymentProvider: 'paystack',
+    paymentReference: reference,
+    paymentMetadata: null,
+    periodStart,
+    periodEnd,
+    dueDate: now,
+    paidAt: null,
+    notes: null,
+  })
+
+  const paystackSecret = requireEnv('PAYSTACK_SECRET_KEY')
+  const payload = {
+    email,
+    amount: Math.round(amount * 100),
+    currency: String(plan.currency ?? 'NGN'),
+    reference,
+    callback_url: redirectUrl ? String(redirectUrl) : undefined,
+    metadata: {
+      shopId: String(shopId),
+      invoiceId: String(invoice._id),
+      planId: String(planId),
+      subscriptionId: String(subscription._id),
+    },
+  }
+
+  const resp = await fetch('https://api.paystack.co/transaction/initialize', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${paystackSecret}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+
+  const data = await resp.json().catch(() => null)
+  if (!resp.ok || !data?.status) {
+    await Invoice.findByIdAndUpdate(String(invoice._id), { $set: { status: 'void', paymentMetadata: data ?? null } })
+    return res.status(502).json({ error: 'Failed to initialize Paystack transaction' })
+  }
+
+  await Invoice.findByIdAndUpdate(String(invoice._id), { $set: { paymentMetadata: data?.data ?? null } })
+
+  res.status(200).json({
+    authorizationUrl: String(data?.data?.authorization_url ?? ''),
+    reference,
+    invoiceId: String(invoice._id),
+  })
+}
+
+async function applyPaystackPayment(reference, paystackData) {
+  const invoice = await Invoice.findOne({ paymentProvider: 'paystack', paymentReference: reference }).lean()
+  if (!invoice) return { invoice: null, subscription: null }
+  if (invoice.status === 'paid') {
+    const subscription = await StoreSubscription.findById(String(invoice.subscriptionId)).lean()
+    return { invoice, subscription }
+  }
+
+  const status = String(paystackData?.status ?? '')
+  if (status !== 'success') return { invoice: null, subscription: null }
+
+  const paidAmount = Number(paystackData?.amount ?? NaN)
+  const expectedAmount = Math.round(Number(invoice.amount ?? 0) * 100)
+  if (!Number.isFinite(paidAmount) || paidAmount !== expectedAmount) return { invoice: null, subscription: null }
+
+  const paidAt = paystackData?.paid_at ? new Date(paystackData.paid_at) : new Date()
+
+  const updatedInvoice = await Invoice.findByIdAndUpdate(
+    String(invoice._id),
+    { $set: { status: 'paid', paidAt, paymentMetadata: paystackData } },
+    { new: true },
+  ).lean()
+
+  const updatedSubscription = await StoreSubscription.findByIdAndUpdate(
+    String(invoice.subscriptionId),
+    {
+      $set: {
+        status: 'active',
+        planId: String(invoice.planId),
+        currentPeriodStart: invoice.periodStart,
+        currentPeriodEnd: invoice.periodEnd,
+        cancelAtPeriodEnd: false,
+        canceledAt: null,
+      },
+    },
+    { new: true },
+  ).lean()
+
+  return { invoice: updatedInvoice, subscription: updatedSubscription }
+}
+
+async function verifyPaystackPayment(req, res) {
+  const shopId = req.params.shopId
+  const reference = String(req.query.reference ?? req.query.trxref ?? '').trim()
+  if (!reference) return res.status(400).json({ error: 'reference is required' })
+
+  const paystackSecret = requireEnv('PAYSTACK_SECRET_KEY')
+  const resp = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
+    headers: { Authorization: `Bearer ${paystackSecret}` },
+  })
+  const data = await resp.json().catch(() => null)
+  if (!resp.ok || !data?.status) return res.status(502).json({ error: 'Unable to verify payment' })
+
+  const paystackTx = data?.data ?? null
+  const invoice = await Invoice.findOne({ paymentProvider: 'paystack', paymentReference: reference }).lean()
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' })
+  if (String(invoice.shopId) !== String(shopId)) return res.status(403).json({ error: 'Forbidden' })
+
+  const applied = await applyPaystackPayment(reference, paystackTx)
+  if (!applied.invoice) return res.status(400).json({ error: 'Payment not completed' })
+
+  res.status(200).json({ invoice: applied.invoice, subscription: applied.subscription })
+}
+
+async function paystackWebhook(req, res) {
+  const signature = String(req.headers['x-paystack-signature'] ?? '')
+  if (!signature) return res.status(400).json({ error: 'Missing signature' })
+
+  const secret = requireEnv('PAYSTACK_SECRET_KEY')
+  const raw = req.rawBody
+  if (!raw) return res.status(400).json({ error: 'Missing payload' })
+
+  const computed = crypto.createHmac('sha512', secret).update(raw).digest('hex')
+  if (computed !== signature) return res.status(400).json({ error: 'Invalid signature' })
+
+  const event = req.body ?? {}
+  const eventType = String(event?.event ?? '')
+  const reference = String(event?.data?.reference ?? '').trim()
+
+  if (!reference) return res.status(200).json({ ok: true })
+  if (eventType !== 'charge.success' && eventType !== 'transaction.success') return res.status(200).json({ ok: true })
+
+  await applyPaystackPayment(reference, event?.data ?? null)
+  res.status(200).json({ ok: true })
+}
+
 module.exports = {
   listPlans,
   createPlan,
@@ -209,5 +419,9 @@ module.exports = {
   updateSubscription,
   listInvoices,
   markInvoicePaid,
+  listShopPlans,
+  getShopSubscription,
+  initializePaystackPayment,
+  verifyPaystackPayment,
+  paystackWebhook,
 }
-

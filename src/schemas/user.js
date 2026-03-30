@@ -8,6 +8,7 @@ const userSchema = new mongoose.Schema(
     role: { type: String, required: true, default: 'cashier' },
     shopIds: { type: [String], default: [] },
     isActive: { type: Boolean, default: true },
+    salaryOrWage: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true },
 )

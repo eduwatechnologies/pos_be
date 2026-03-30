@@ -14,6 +14,7 @@ const shopSchema = new mongoose.Schema(
         admin: {
           dashboard: true,
           terminal: true,
+          customers: true,
           receipts: true,
           analytics: true,
           inventory: true,
@@ -23,6 +24,7 @@ const shopSchema = new mongoose.Schema(
         cashier: {
           dashboard: true,
           terminal: true,
+          customers: false,
           receipts: true,
           analytics: false,
           inventory: false,
