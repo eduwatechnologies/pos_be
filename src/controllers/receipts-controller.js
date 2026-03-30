@@ -1,5 +1,6 @@
 const { Receipt } = require('../schemas/receipt')
 const { Product } = require('../schemas/product')
+const { logAudit } = require('../utils/audit-log')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 
@@ -109,6 +110,14 @@ async function createReceipt(req, res) {
     await Product.updateOne({ _id: u.productId, shopId }, { $inc: { stockQty: -u.qty } })
   }
 
+  await logAudit(req, {
+    shopId,
+    action: 'create',
+    entityType: 'receipt',
+    entityId: String(receipt._id),
+    metadata: { totalCents, paymentMethod, itemCount: normalizedItems.length },
+  })
+
   res.status(201).json({ item: receipt })
 }
 
@@ -154,6 +163,14 @@ async function refundReceipt(req, res) {
   for (const u of stockUpdates) {
     await Product.updateOne({ _id: u.productId, shopId }, { $inc: { stockQty: u.qty } })
   }
+
+  await logAudit(req, {
+    shopId,
+    action: 'refund',
+    entityType: 'receipt',
+    entityId: String(receiptId),
+    metadata: { reason: receipt.refundReason },
+  })
 
   res.status(200).json({ item: receipt.toObject() })
 }

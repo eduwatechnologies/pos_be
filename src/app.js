@@ -13,6 +13,8 @@ function createApp() {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
+    'https://possuperadmin-production.up.railway.app',
+    'https://posadmin-production.up.railway.app'
   ]
   const corsOptions = {
     origin: (origin, callback) => {
