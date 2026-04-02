@@ -2,8 +2,11 @@ const { Product } = require('../schemas/product')
 const { Purchase } = require('../schemas/purchase')
 const { Supplier } = require('../schemas/supplier')
 const { logAudit } = require('../utils/audit-log')
+const { requireEnv } = require('../utils/require-env')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
+let cloudinaryConfigured = false
+let cloudinaryV2 = null
 
 function escapeRegex(input) {
   return input.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -17,6 +20,30 @@ function normalizeNullableString(input) {
   if (input === null || input === undefined) return null
   const s = String(input).trim()
   return s ? s : null
+}
+
+function getCloudinaryV2() {
+  if (cloudinaryV2) return cloudinaryV2
+  try {
+    cloudinaryV2 = require('cloudinary').v2
+    return cloudinaryV2
+  } catch {
+    const err = new Error('Cloudinary dependency is missing. Install it with: npm install cloudinary')
+    err.status = 500
+    throw err
+  }
+}
+
+function ensureCloudinaryConfigured() {
+  if (cloudinaryConfigured) return
+  const cloudinary = getCloudinaryV2()
+  cloudinary.config({
+    cloud_name: requireEnv('CLOUDINARY_CLOUD_NAME'),
+    api_key: requireEnv('CLOUDINARY_API_KEY'),
+    api_secret: requireEnv('CLOUDINARY_API_SECRET'),
+    secure: true,
+  })
+  cloudinaryConfigured = true
 }
 
 async function listProducts(req, res) {
@@ -300,4 +327,46 @@ async function adjustStock(req, res) {
   res.status(200).json({ item })
 }
 
-module.exports = { listProducts, createProduct, getProduct, getProductDetail, updateProduct, deleteProduct, adjustStock }
+async function uploadProductImage(req, res) {
+  ensureCloudinaryConfigured()
+
+  const shopId = req.params.shopId
+  const { dataUrl } = req.body ?? {}
+  const normalizedDataUrl = typeof dataUrl === 'string' ? dataUrl.trim() : ''
+
+  if (!normalizedDataUrl) {
+    return res.status(400).json({ error: 'dataUrl is required' })
+  }
+
+  if (!normalizedDataUrl.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Only image uploads are allowed' })
+  }
+
+  const folder = String(process.env.CLOUDINARY_PRODUCTS_FOLDER ?? 'bills-can/products').trim() || 'bills-can/products'
+
+  try {
+    const cloudinary = getCloudinaryV2()
+    const result = await cloudinary.uploader.upload(normalizedDataUrl, {
+      folder,
+      resource_type: 'image',
+      context: `shopId=${shopId}`,
+    })
+
+    console.log(`Cloudinary product image uploaded: ${result.secure_url}`)
+
+    res.status(201).json({
+      url: result.secure_url,
+      publicId: result.public_id,
+      width: result.width,
+      height: result.height,
+    })
+  } catch (err) {
+    const httpCode = typeof err?.http_code === 'number' ? err.http_code : null
+    const status = httpCode && httpCode >= 400 && httpCode < 600 ? httpCode : 502
+    const message = err?.message ? String(err.message) : 'Failed to upload image'
+    console.error('Cloudinary upload failed', { status, message })
+    res.status(status).json({ error: message })
+  }
+}
+
+module.exports = { listProducts, createProduct, getProduct, getProductDetail, updateProduct, deleteProduct, adjustStock, uploadProductImage }

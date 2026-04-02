@@ -10,6 +10,14 @@ productsRouter.get('/', requireAuth, requireShopAccess, requireShopPermission(['
 
 productsRouter.post('/', requireAuth, requireShopAccess, requireShopPermission('inventory'), productsController.createProduct)
 
+productsRouter.post(
+  '/upload-image',
+  requireAuth,
+  requireShopAccess,
+  requireShopPermission('inventory'),
+  productsController.uploadProductImage,
+)
+
 productsRouter.get('/:productId', requireAuth, requireShopAccess, requireShopPermission(['inventory', 'terminal']), productsController.getProduct)
 
 productsRouter.get(

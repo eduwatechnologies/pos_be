@@ -34,7 +34,7 @@ function createApp() {
   app.options('*', cors(corsOptions))
   app.use(
     express.json({
-      limit: '2mb',
+      limit: '10mb',
       verify: (req, _res, buf) => {
         req.rawBody = buf
       },
