@@ -1,6 +1,8 @@
 const { Product } = require('../schemas/product')
 const { Purchase } = require('../schemas/purchase')
+const { Shop } = require('../schemas/shop')
 const { Supplier } = require('../schemas/supplier')
+const { StockMovement } = require('../schemas/stock-movement')
 const { logAudit } = require('../utils/audit-log')
 const { requireEnv } = require('../utils/require-env')
 
@@ -175,7 +177,12 @@ async function getProductDetail(req, res) {
     ? await Supplier.find({ shopId, _id: { $in: Array.from(supplierIds) } }).select({ name: 1 }).lean()
     : []
 
-  res.status(200).json({ item, purchases, suppliers })
+  const movements = await StockMovement.find({ shopId, productId: String(productId) })
+    .sort({ occurredAt: -1 })
+    .limit(50)
+    .lean()
+
+  res.status(200).json({ item, purchases, suppliers, movements })
 }
 
 async function updateProduct(req, res) {
@@ -301,18 +308,33 @@ async function adjustStock(req, res) {
     return res.status(400).json({ error: 'Invalid productId' })
   }
 
-  const { delta } = req.body ?? {}
-  if (typeof delta !== 'number' || !Number.isFinite(delta)) {
-    return res.status(400).json({ error: 'delta must be a number' })
+  const { delta, reason } = req.body ?? {}
+  if (typeof delta !== 'number' || !Number.isFinite(delta) || !Number.isInteger(delta) || delta === 0) {
+    return res.status(400).json({ error: 'delta must be a non-zero integer' })
+  }
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : ''
+  if (!trimmedReason) {
+    return res.status(400).json({ error: 'reason is required' })
   }
 
-  const item = await Product.findOneAndUpdate(
-    { _id: productId, shopId },
-    { $inc: { stockQty: delta } },
-    { new: true },
-  ).lean()
+  const shop = await Shop.findById(shopId).select({ allowNegativeStock: 1 }).lean()
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+  const allowNegativeStock = shop.allowNegativeStock === true
+
+  const filter = { _id: productId, shopId }
+  if (!allowNegativeStock && delta < 0) {
+    filter.stockQty = { $gte: -delta }
+  }
+
+  const item = await Product.findOneAndUpdate(filter, { $inc: { stockQty: delta } }, { new: true }).lean()
 
   if (!item) {
+    if (!allowNegativeStock && delta < 0) {
+      const exists = await Product.findOne({ _id: productId, shopId }).select({ _id: 1 }).lean()
+      if (exists) return res.status(409).json({ error: 'Insufficient stock' })
+    }
     return res.status(404).json({ error: 'Not found' })
   }
 
@@ -321,8 +343,23 @@ async function adjustStock(req, res) {
     action: 'adjust_stock',
     entityType: 'product',
     entityId: String(productId),
-    metadata: { delta },
+    metadata: { delta, reason: trimmedReason },
   })
+
+  try {
+    await StockMovement.create({
+      shopId,
+      productId: String(productId),
+      type: 'adjustment',
+      qtyDelta: Number(delta),
+      sourceType: 'product',
+      sourceId: String(productId),
+      unitPriceCents: null,
+      unitCostCents: null,
+      notes: trimmedReason,
+      occurredAt: new Date(),
+    })
+  } catch {}
 
   res.status(200).json({ item })
 }

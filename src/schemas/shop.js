@@ -8,6 +8,8 @@ const shopSchema = new mongoose.Schema(
     businessLogoUrl: { type: String, default: null },
     address: { type: String, default: null },
     phone: { type: String, default: null },
+    taxRateBps: { type: Number, default: 800, min: 0, max: 10000 },
+    allowNegativeStock: { type: Boolean, default: false },
     rolePermissions: {
       type: Object,
       default: () => ({

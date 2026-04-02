@@ -84,6 +84,8 @@ async function getSettings(req, res) {
       businessLogoUrl: shop.businessLogoUrl,
       address: shop.address,
       phone: shop.phone,
+      taxRateBps: typeof shop.taxRateBps === 'number' && Number.isFinite(shop.taxRateBps) ? shop.taxRateBps : 0,
+      allowNegativeStock: shop.allowNegativeStock === true,
       rolePermissions: normalizeRolePermissions(shop.rolePermissions),
     },
   })
@@ -92,13 +94,33 @@ async function getSettings(req, res) {
 async function updateSettings(req, res) {
   const shopId = req.params.shopId
   const updates = {}
-  const allowed = ['name', 'currency', 'businessName', 'businessLogoUrl', 'address', 'phone', 'rolePermissions']
+  const allowed = [
+    'name',
+    'currency',
+    'businessName',
+    'businessLogoUrl',
+    'address',
+    'phone',
+    'rolePermissions',
+    'taxRateBps',
+    'allowNegativeStock',
+  ]
   for (const key of allowed) {
     if (key in (req.body ?? {})) updates[key] = req.body[key]
   }
 
   if ('rolePermissions' in updates) {
     updates.rolePermissions = normalizeRolePermissions(updates.rolePermissions)
+  }
+  if ('taxRateBps' in updates) {
+    const n = Number(updates.taxRateBps)
+    if (!Number.isFinite(n) || n < 0 || n > 10000) {
+      return res.status(400).json({ error: 'taxRateBps must be between 0 and 10000' })
+    }
+    updates.taxRateBps = Math.round(n)
+  }
+  if ('allowNegativeStock' in updates) {
+    updates.allowNegativeStock = updates.allowNegativeStock === true
   }
 
   const shop = await Shop.findByIdAndUpdate(shopId, { $set: updates }, { new: true }).lean()
@@ -115,6 +137,8 @@ async function updateSettings(req, res) {
       businessLogoUrl: shop.businessLogoUrl,
       address: shop.address,
       phone: shop.phone,
+      taxRateBps: typeof shop.taxRateBps === 'number' && Number.isFinite(shop.taxRateBps) ? shop.taxRateBps : 0,
+      allowNegativeStock: shop.allowNegativeStock === true,
       rolePermissions: normalizeRolePermissions(shop.rolePermissions),
     },
   })

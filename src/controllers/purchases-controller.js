@@ -2,6 +2,7 @@ const mongoose = require('mongoose')
 const { Purchase } = require('../schemas/purchase')
 const { Product } = require('../schemas/product')
 const { Supplier } = require('../schemas/supplier')
+const { StockMovement } = require('../schemas/stock-movement')
 const { logAudit } = require('../utils/audit-log')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
@@ -158,6 +159,23 @@ async function createPurchase(req, res) {
           })),
           { session },
         )
+        if (purchase) {
+          const movements = purchaseItems.map((i) => ({
+            shopId,
+            productId: String(i.productId),
+            type: 'purchase',
+            qtyDelta: Number(i.qty ?? 0),
+            sourceType: 'purchase',
+            sourceId: String(purchase._id),
+            unitPriceCents: null,
+            unitCostCents: Number(i.unitCostCents ?? 0),
+            notes: null,
+            occurredAt: purchase.purchasedAt ?? new Date(),
+          }))
+          try {
+            await StockMovement.insertMany(movements, { session })
+          } catch {}
+        }
       })
     } catch (err) {
       const message = String(err?.message ?? '')
@@ -188,6 +206,23 @@ async function createPurchase(req, res) {
           },
         })),
       )
+      if (purchase) {
+        const movements = purchaseItems.map((i) => ({
+          shopId,
+          productId: String(i.productId),
+          type: 'purchase',
+          qtyDelta: Number(i.qty ?? 0),
+          sourceType: 'purchase',
+          sourceId: String(purchase._id),
+          unitPriceCents: null,
+          unitCostCents: Number(i.unitCostCents ?? 0),
+          notes: null,
+          occurredAt: purchase.purchasedAt ?? new Date(),
+        }))
+        try {
+          await StockMovement.insertMany(movements)
+        } catch {}
+      }
     }
   } finally {
     session.endSession()
@@ -282,6 +317,23 @@ async function voidPurchase(req, res) {
           err.status = 409
           throw err
         }
+        if (updated) {
+          const movements = Array.from(qtyToReverseByProductId.entries()).map(([productId, qty]) => ({
+            shopId,
+            productId: String(productId),
+            type: 'purchase_void',
+            qtyDelta: -Number(qty ?? 0),
+            sourceType: 'purchase',
+            sourceId: String(updated._id),
+            unitPriceCents: null,
+            unitCostCents: null,
+            notes: null,
+            occurredAt: updated.voidedAt ?? new Date(),
+          }))
+          try {
+            await StockMovement.insertMany(movements, { session })
+          } catch {}
+        }
       })
     } catch (err) {
       const message = String(err?.message ?? '')
@@ -304,6 +356,23 @@ async function voidPurchase(req, res) {
       const bulkRes = await Product.bulkWrite(reverseOps)
       if (bulkRes.modifiedCount !== reverseOps.length) {
         return res.status(409).json({ error: 'Cannot void purchase: insufficient stock to reverse' })
+      }
+      if (updated) {
+        const movements = Array.from(qtyToReverseByProductId.entries()).map(([productId, qty]) => ({
+          shopId,
+          productId: String(productId),
+          type: 'purchase_void',
+          qtyDelta: -Number(qty ?? 0),
+          sourceType: 'purchase',
+          sourceId: String(updated._id),
+          unitPriceCents: null,
+          unitCostCents: null,
+          notes: null,
+          occurredAt: updated.voidedAt ?? new Date(),
+        }))
+        try {
+          await StockMovement.insertMany(movements)
+        } catch {}
       }
     }
   } finally {

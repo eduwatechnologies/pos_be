@@ -1,5 +1,8 @@
+const mongoose = require('mongoose')
 const { Receipt } = require('../schemas/receipt')
 const { Product } = require('../schemas/product')
+const { Shop } = require('../schemas/shop')
+const { StockMovement } = require('../schemas/stock-movement')
 const { logAudit } = require('../utils/audit-log')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
@@ -48,6 +51,10 @@ async function createReceipt(req, res) {
   if (!paymentMethod) {
     return res.status(400).json({ error: 'paymentMethod is required' })
   }
+  const normalizedPaymentMethod = String(paymentMethod).trim().toLowerCase() === 'digital' ? 'transfer' : String(paymentMethod).trim().toLowerCase()
+  if (!['cash', 'card', 'transfer', 'other'].includes(normalizedPaymentMethod)) {
+    return res.status(400).json({ error: 'Invalid paymentMethod' })
+  }
 
   const incomingItems = items.slice(0, 200)
   const productIds = incomingItems.map((i) => i?.productId).filter(Boolean)
@@ -65,6 +72,9 @@ async function createReceipt(req, res) {
 
     const productId = raw?.productId ? String(raw.productId) : null
     const product = productId ? productsById.get(productId) : null
+    if (productId && !product) {
+      return res.status(400).json({ error: 'One or more products not found' })
+    }
 
     const name = String(raw?.name ?? product?.name ?? '').trim()
     if (!name) {
@@ -89,25 +99,140 @@ async function createReceipt(req, res) {
   const safeTaxCents = Number.isFinite(Number(taxCents)) && Number(taxCents) >= 0 ? Number(taxCents) : 0
   const totalCents = subtotalCents + safeTaxCents
 
-  const receipt = await Receipt.create({
+  const shop = await Shop.findById(shopId).select({ allowNegativeStock: 1 }).lean()
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+  const allowNegativeStock = shop.allowNegativeStock === true
+
+  const qtyByProductId = new Map()
+  for (const i of normalizedItems) {
+    const productId = i.productId ? String(i.productId) : ''
+    if (!productId) continue
+    if (!objectIdRe.test(productId)) return res.status(400).json({ error: 'Invalid productId in items' })
+    qtyByProductId.set(productId, (qtyByProductId.get(productId) ?? 0) + Number(i.qty ?? 0))
+  }
+
+  const stockOps = Array.from(qtyByProductId.entries()).map(([productId, qty]) => ({
+    updateOne: {
+      filter: allowNegativeStock ? { _id: productId, shopId } : { _id: productId, shopId, stockQty: { $gte: qty } },
+      update: { $inc: { stockQty: -qty } },
+    },
+  }))
+
+  const receiptData = {
     shopId,
     cashierUserId,
     customerName: customerName ? String(customerName) : null,
-    paymentMethod,
+    paymentMethod: normalizedPaymentMethod,
     items: normalizedItems,
     subtotalCents,
     taxCents: safeTaxCents,
     totalCents,
     paidAt: new Date(),
     status: 'paid',
-  })
+  }
 
-  const stockUpdates = normalizedItems
-    .filter((i) => i.productId)
-    .map((i) => ({ productId: i.productId, qty: i.qty }))
+  let receipt = null
+  const session = await mongoose.startSession()
+  try {
+    try {
+      await session.withTransaction(async () => {
+        if (stockOps.length) {
+          const bulkRes = await Product.bulkWrite(stockOps, { session })
+          if (!allowNegativeStock && bulkRes.modifiedCount !== stockOps.length) {
+            const err = new Error('Insufficient stock')
+            err.status = 409
+            throw err
+          }
+        }
 
-  for (const u of stockUpdates) {
-    await Product.updateOne({ _id: u.productId, shopId }, { $inc: { stockQty: -u.qty } })
+        const created = await Receipt.create([receiptData], { session })
+        receipt = created?.[0] ?? null
+
+        if (receipt) {
+          const movements = normalizedItems
+            .filter((i) => i.productId)
+            .map((i) => ({
+              shopId,
+              productId: String(i.productId),
+              type: 'sale',
+              qtyDelta: -Number(i.qty ?? 0),
+              sourceType: 'receipt',
+              sourceId: String(receipt._id),
+              unitPriceCents: Number(i.unitPriceCents ?? 0),
+              unitCostCents: null,
+              notes: null,
+              occurredAt: receipt.paidAt ?? new Date(),
+            }))
+          if (movements.length) {
+            try {
+              await StockMovement.insertMany(movements, { session })
+            } catch {}
+          }
+        }
+      })
+    } catch (err) {
+      const errStatus = typeof err?.status === 'number' ? err.status : null
+      if (errStatus === 409) {
+        return res.status(409).json({ error: 'Insufficient stock' })
+      }
+
+      const message = String(err?.message ?? '')
+      const isTxNotSupported =
+        message.includes('Transaction numbers are only allowed') ||
+        message.includes('replica set member') ||
+        message.includes('mongos')
+      if (!isTxNotSupported) throw err
+
+      if (stockOps.length) {
+        const bulkRes = await Product.bulkWrite(stockOps)
+        if (!allowNegativeStock && bulkRes.modifiedCount !== stockOps.length) {
+          return res.status(409).json({ error: 'Insufficient stock' })
+        }
+      }
+
+      try {
+        receipt = await Receipt.create(receiptData)
+      } catch (createErr) {
+        if (stockOps.length) {
+          await Product.bulkWrite(
+            Array.from(qtyByProductId.entries()).map(([productId, qty]) => ({
+              updateOne: { filter: { _id: productId, shopId }, update: { $inc: { stockQty: qty } } },
+            })),
+          )
+        }
+        throw createErr
+      }
+
+      if (receipt) {
+        const movements = normalizedItems
+          .filter((i) => i.productId)
+          .map((i) => ({
+            shopId,
+            productId: String(i.productId),
+            type: 'sale',
+            qtyDelta: -Number(i.qty ?? 0),
+            sourceType: 'receipt',
+            sourceId: String(receipt._id),
+            unitPriceCents: Number(i.unitPriceCents ?? 0),
+            unitCostCents: null,
+            notes: null,
+            occurredAt: receipt.paidAt ?? new Date(),
+          }))
+        if (movements.length) {
+          try {
+            await StockMovement.insertMany(movements)
+          } catch {}
+        }
+      }
+    }
+  } finally {
+    session.endSession()
+  }
+
+  if (!receipt) {
+    return res.status(500).json({ error: 'Failed to create receipt' })
   }
 
   await logAudit(req, {
@@ -143,6 +268,10 @@ async function refundReceipt(req, res) {
   }
 
   const { reason } = req.body ?? {}
+  const trimmedReason = typeof reason === 'string' ? reason.trim() : ''
+  if (!trimmedReason) {
+    return res.status(400).json({ error: 'reason is required' })
+  }
 
   const receipt = await Receipt.findOne({ _id: receiptId, shopId })
   if (!receipt) {
@@ -154,7 +283,7 @@ async function refundReceipt(req, res) {
 
   receipt.status = 'refunded'
   receipt.refundedAt = new Date()
-  receipt.refundReason = reason ? String(reason) : null
+  receipt.refundReason = trimmedReason
   await receipt.save()
 
   const stockUpdates = (receipt.items ?? [])
@@ -162,6 +291,25 @@ async function refundReceipt(req, res) {
     .map((i) => ({ productId: i.productId, qty: i.qty }))
   for (const u of stockUpdates) {
     await Product.updateOne({ _id: u.productId, shopId }, { $inc: { stockQty: u.qty } })
+  }
+
+  if (stockUpdates.length) {
+    try {
+      await StockMovement.insertMany(
+        stockUpdates.map((u) => ({
+          shopId,
+          productId: String(u.productId),
+          type: 'refund',
+          qtyDelta: Number(u.qty ?? 0),
+          sourceType: 'receipt',
+          sourceId: String(receiptId),
+          unitPriceCents: null,
+          unitCostCents: null,
+          notes: receipt.refundReason ?? null,
+          occurredAt: receipt.refundedAt ?? new Date(),
+        })),
+      )
+    } catch {}
   }
 
   await logAudit(req, {
