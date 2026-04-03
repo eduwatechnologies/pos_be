@@ -2,8 +2,35 @@ const jwt = require('jsonwebtoken')
 
 const { Shop } = require('../schemas/shop')
 const { User } = require('../schemas/user')
+const { SubscriptionPlan } = require('../schemas/subscription-plan')
+const { StoreSubscription } = require('../schemas/store-subscription')
 const { hashPassword, verifyPassword } = require('../utils/password')
 const { requireEnv } = require('../utils/require-env')
+
+async function ensureTrialPlan() {
+  const existing = await SubscriptionPlan.findOne({ code: 'trial' }).lean()
+  if (existing) {
+    const currentDays = Number(existing?.features?.trialDays ?? NaN)
+    if (currentDays !== 7) {
+      const updated = await SubscriptionPlan.findByIdAndUpdate(
+        existing._id,
+        { $set: { features: { ...(existing.features || {}), trialDays: 7 } } },
+        { new: true },
+      ).lean()
+      return updated ?? existing
+    }
+    return existing
+  }
+  const item = await SubscriptionPlan.create({
+    name: 'Trial',
+    code: 'trial',
+    currency: 'NGN',
+    priceMonthly: 0,
+    features: { trialDays: 7 },
+    isActive: false,
+  })
+  return item.toObject ? item.toObject() : item
+}
 
 async function register(req, res) {
   const { email, password, name, shopName, currency } = req.body ?? {}
@@ -21,12 +48,30 @@ async function register(req, res) {
     return res.status(409).json({ error: 'Email already exists' })
   }
 
-  const shop = await Shop.create({
-    name: normalizedShopName,
-    currency: (currency ? String(currency).trim() : '') || 'NGN',
-  })
-
+  let shop = null
+  let subscription = null
   try {
+    shop = await Shop.create({
+      name: normalizedShopName,
+      currency: (currency ? String(currency).trim() : '') || 'NGN',
+    })
+
+    const trialPlan = await ensureTrialPlan()
+    const trialDays = Number(trialPlan?.features?.trialDays ?? 7)
+    const days = Number.isFinite(trialDays) && trialDays > 0 ? Math.floor(trialDays) : 7
+    const now = new Date()
+    const periodEnd = new Date(now.getTime() + days * 24 * 60 * 60 * 1000)
+
+    subscription = await StoreSubscription.create({
+      shopId: shop._id,
+      planId: trialPlan._id,
+      status: 'active',
+      currentPeriodStart: now,
+      currentPeriodEnd: periodEnd,
+      cancelAtPeriodEnd: false,
+      canceledAt: null,
+    })
+
     const passwordHash = await hashPassword(password)
     const user = await User.create({
       email: normalizedEmail,
@@ -61,7 +106,12 @@ async function register(req, res) {
       },
     })
   } catch (err) {
-    await Shop.findByIdAndDelete(shop._id)
+    if (subscription?._id) {
+      await StoreSubscription.findByIdAndDelete(subscription._id)
+    }
+    if (shop?._id) {
+      await Shop.findByIdAndDelete(shop._id)
+    }
     throw err
   }
 }
