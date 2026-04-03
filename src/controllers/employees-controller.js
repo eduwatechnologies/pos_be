@@ -1,9 +1,19 @@
 const { User } = require('../schemas/user')
 const { hashPassword } = require('../utils/password')
 const { Shop } = require('../schemas/shop')
+const { StoreSubscription } = require('../schemas/store-subscription')
+const { SubscriptionPlan } = require('../schemas/subscription-plan')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 const protectedRoles = ['admin', 'super_admin']
+
+function parseLimitNumber(value) {
+  if (value == null) return null
+  const n = Number(value)
+  if (!Number.isFinite(n)) return null
+  if (n < 0) return null
+  return Math.floor(n)
+}
 
 async function listEmployees(req, res) {
   const shopId = req.params.shopId
@@ -46,6 +56,35 @@ async function createEmployee(req, res) {
   const parsedSalaryOrWage = salaryOrWage == null ? 0 : Number(salaryOrWage)
   if (!Number.isFinite(parsedSalaryOrWage) || parsedSalaryOrWage < 0) {
     return res.status(400).json({ error: 'salaryOrWage must be a non-negative number' })
+  }
+
+  if (req.user?.role !== 'super_admin') {
+    const subscription = await StoreSubscription.findOne({
+      shopId: String(shopId),
+      status: { $in: ['active', 'past_due', 'canceled'] },
+    })
+      .sort({ createdAt: -1 })
+      .select({ planId: 1 })
+      .lean()
+
+    if (subscription?.planId) {
+      const plan = await SubscriptionPlan.findById(String(subscription.planId))
+        .select({ features: 1 })
+        .lean()
+
+      const maxEmployees = parseLimitNumber(plan?.features?.maxEmployees)
+      if (typeof maxEmployees === 'number') {
+        const employeeCount = await User.countDocuments({ shopIds: shopId, role: { $nin: protectedRoles } })
+        if (employeeCount >= maxEmployees) {
+          return res.status(403).json({
+            error: 'Employee limit reached for your plan. Upgrade to add more staff.',
+            code: 'PLAN_LIMIT',
+            limitKey: 'maxEmployees',
+            limit: maxEmployees,
+          })
+        }
+      }
+    }
   }
 
   const existing = await User.findOne({ email: normalizedEmail }).lean()

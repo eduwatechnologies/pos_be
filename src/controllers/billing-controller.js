@@ -102,6 +102,7 @@ async function createSubscription(req, res) {
   if (!shop) return res.status(404).json({ error: 'Shop not found' })
   const plan = await SubscriptionPlan.findById(String(planId)).lean()
   if (!plan) return res.status(404).json({ error: 'Plan not found' })
+  if (plan.isActive === false) return res.status(400).json({ error: 'Plan is disabled' })
 
   const existingActive = await StoreSubscription.findOne({
     shopId: String(shopId),
