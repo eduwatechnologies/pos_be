@@ -1,4 +1,6 @@
 const { Shop } = require('../schemas/shop')
+const { StoreSubscription } = require('../schemas/store-subscription')
+const { SubscriptionPlan } = require('../schemas/subscription-plan')
 
 function normalizeRolePermissions(input) {
   const defaults = {
@@ -84,7 +86,39 @@ function requireShopPermission(permissionKey) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    if (user.role === 'super_admin' || user.role === 'admin') {
+    if (user.role === 'super_admin') {
+      return next()
+    }
+
+    const keys = Array.isArray(permissionKey) ? permissionKey : [permissionKey]
+
+    try {
+      const subscription = await StoreSubscription.findOne({
+        shopId: String(shopId),
+        status: { $in: ['active', 'past_due'] },
+      })
+        .sort({ createdAt: -1 })
+        .select({ planId: 1 })
+        .lean()
+
+      const planId = subscription?.planId ? String(subscription.planId) : ''
+      if (planId) {
+        const plan = await SubscriptionPlan.findById(planId).select({ features: 1, isActive: 1 }).lean()
+        const modules = plan?.features?.modules
+        const shouldEnforce = plan?.isActive !== false && modules && typeof modules === 'object'
+
+        if (shouldEnforce) {
+          const planAllows = keys.some((k) => (k in modules ? Boolean(modules[k]) : true))
+          if (!planAllows) {
+            return res.status(403).json({ error: 'Feature not available on current plan' })
+          }
+        }
+      }
+    } catch {
+      return res.status(403).json({ error: 'Feature not available on current plan' })
+    }
+
+    if (user.role === 'admin') {
       return next()
     }
 
@@ -95,7 +129,6 @@ function requireShopPermission(permissionKey) {
 
     const rolePermissions = normalizeRolePermissions(shop?.rolePermissions)
     const roleKey = String(user.role ?? '')
-    const keys = Array.isArray(permissionKey) ? permissionKey : [permissionKey]
     const allowed = keys.some((k) => Boolean(rolePermissions?.[roleKey]?.[k]))
 
     if (!allowed) {

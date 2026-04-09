@@ -24,6 +24,14 @@ customersRouter.post(
 
 customersRouter.get('/:customerId', requireAuth, requireShopAccess, requireShopPermission('customers'), customersController.getCustomer)
 
+customersRouter.get(
+  '/:customerId/activity',
+  requireAuth,
+  requireShopAccess,
+  requireShopPermission(['customers', 'receipts']),
+  customersController.getCustomerActivity,
+)
+
 customersRouter.patch('/:customerId', requireAuth, requireShopAccess, requireShopPermission('customers'), customersController.updateCustomer)
 
 customersRouter.delete(

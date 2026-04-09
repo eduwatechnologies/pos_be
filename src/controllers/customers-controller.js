@@ -1,4 +1,5 @@
 const { Customer } = require('../schemas/customer')
+const { Receipt } = require('../schemas/receipt')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 
@@ -141,5 +142,37 @@ async function deleteCustomer(req, res) {
   res.status(200).json({ ok: true })
 }
 
-module.exports = { listCustomers, createCustomer, getCustomer, updateCustomer, deleteCustomer }
+async function getCustomerActivity(req, res) {
+  const shopId = req.params.shopId
+  const customerId = req.params.customerId
+  if (!objectIdRe.test(customerId)) {
+    return res.status(400).json({ error: 'Invalid customerId' })
+  }
 
+  const customer = await Customer.findOne({ _id: customerId, shopId }).lean()
+  if (!customer) {
+    return res.status(404).json({ error: 'Not found' })
+  }
+
+  const name = String(customer?.name ?? '').trim()
+  const nameRegex = name ? new RegExp(`^${escapeRegex(name)}$`, 'i') : null
+
+  const receiptFilter = { shopId, $or: [{ customerId: String(customerId) }] }
+  if (nameRegex) receiptFilter.$or.push({ customerName: nameRegex })
+
+  const receipts = await Receipt.find(receiptFilter).sort({ paidAt: -1 }).limit(300).lean()
+
+  const paidReceipts = receipts.filter((r) => String(r?.status ?? 'paid') !== 'refunded')
+  const totalSpentCents = paidReceipts.reduce((sum, r) => sum + Number(r?.totalCents ?? 0), 0)
+  const totalOrders = paidReceipts.length
+  const refundedCount = receipts.length - paidReceipts.length
+  const lastPurchaseAt = paidReceipts.length ? paidReceipts[0]?.paidAt ?? null : null
+
+  res.status(200).json({
+    customer,
+    receipts,
+    summary: { totalOrders, totalSpentCents, refundedCount, lastPurchaseAt },
+  })
+}
+
+module.exports = { listCustomers, createCustomer, getCustomer, updateCustomer, deleteCustomer, getCustomerActivity }

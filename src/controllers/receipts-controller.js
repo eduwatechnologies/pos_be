@@ -3,6 +3,7 @@ const { Receipt } = require('../schemas/receipt')
 const { Product } = require('../schemas/product')
 const { Shop } = require('../schemas/shop')
 const { StockMovement } = require('../schemas/stock-movement')
+const { Customer } = require('../schemas/customer')
 const { logAudit } = require('../utils/audit-log')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
@@ -15,12 +16,17 @@ async function listReceipts(req, res) {
   const shopId = req.params.shopId
 
   const paymentMethod = String(req.query.paymentMethod ?? '').trim()
+  const customerId = String(req.query.customerId ?? '').trim()
   const from = String(req.query.from ?? '').trim()
   const to = String(req.query.to ?? '').trim()
   const q = String(req.query.q ?? '').trim()
 
   const filter = { shopId }
   if (paymentMethod) filter.paymentMethod = paymentMethod
+  if (customerId) {
+    if (!objectIdRe.test(customerId)) return res.status(400).json({ error: 'Invalid customerId' })
+    filter.customerId = customerId
+  }
 
   if (from || to) {
     filter.paidAt = {}
@@ -44,7 +50,7 @@ async function createReceipt(req, res) {
   const shopId = req.params.shopId
   const cashierUserId = req.user.sub
 
-  const { items, customerName, paymentMethod, taxCents } = req.body ?? {}
+  const { items, customerId, customerName, paymentMethod, taxCents, discountCents } = req.body ?? {}
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items are required' })
   }
@@ -54,6 +60,17 @@ async function createReceipt(req, res) {
   const normalizedPaymentMethod = String(paymentMethod).trim().toLowerCase() === 'digital' ? 'transfer' : String(paymentMethod).trim().toLowerCase()
   if (!['cash', 'card', 'transfer', 'other'].includes(normalizedPaymentMethod)) {
     return res.status(400).json({ error: 'Invalid paymentMethod' })
+  }
+
+  const normalizedCustomerId = customerId ? String(customerId).trim() : ''
+  if (normalizedCustomerId) {
+    if (!objectIdRe.test(normalizedCustomerId)) {
+      return res.status(400).json({ error: 'Invalid customerId' })
+    }
+    const exists = await Customer.findOne({ _id: normalizedCustomerId, shopId }).select({ _id: 1 }).lean()
+    if (!exists) {
+      return res.status(404).json({ error: 'Customer not found' })
+    }
   }
 
   const incomingItems = items.slice(0, 200)
@@ -97,7 +114,11 @@ async function createReceipt(req, res) {
 
   const subtotalCents = normalizedItems.reduce((sum, i) => sum + i.lineTotalCents, 0)
   const safeTaxCents = Number.isFinite(Number(taxCents)) && Number(taxCents) >= 0 ? Number(taxCents) : 0
-  const totalCents = subtotalCents + safeTaxCents
+  const safeDiscountCents = Number.isFinite(Number(discountCents)) && Number(discountCents) >= 0 ? Number(discountCents) : 0
+  if (safeDiscountCents > subtotalCents) {
+    return res.status(400).json({ error: 'discountCents must be <= subtotalCents' })
+  }
+  const totalCents = subtotalCents - safeDiscountCents + safeTaxCents
 
   const shop = await Shop.findById(shopId).select({ allowNegativeStock: 1 }).lean()
   if (!shop) {
@@ -123,10 +144,12 @@ async function createReceipt(req, res) {
   const receiptData = {
     shopId,
     cashierUserId,
+    customerId: normalizedCustomerId || null,
     customerName: customerName ? String(customerName) : null,
     paymentMethod: normalizedPaymentMethod,
     items: normalizedItems,
     subtotalCents,
+    discountCents: safeDiscountCents,
     taxCents: safeTaxCents,
     totalCents,
     paidAt: new Date(),
