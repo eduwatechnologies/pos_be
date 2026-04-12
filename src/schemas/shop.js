@@ -4,7 +4,7 @@ const shopSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
     currency: { type: String, default: 'NGN' },
-    businessName: { type: String, default: 'ScanSell POS' },
+    businessName: { type: String, default: 'Kounter' },
     businessLogoUrl: { type: String, default: null },
     address: { type: String, default: null },
     phone: { type: String, default: null },

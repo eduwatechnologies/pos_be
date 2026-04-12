@@ -27,7 +27,7 @@ async function ensureShop() {
   const created = await Shop.create({
     name: process.env.SEED_SHOP_NAME ?? 'Main Shop',
     currency: process.env.SEED_SHOP_CURRENCY ?? 'NGN',
-    businessName: process.env.SEED_BUSINESS_NAME ?? 'ScanSell POS',
+    businessName: process.env.SEED_BUSINESS_NAME ?? 'Kounter',
     businessLogoUrl: null,
     address: process.env.SEED_SHOP_ADDRESS ?? null,
     phone: process.env.SEED_SHOP_PHONE ?? null,

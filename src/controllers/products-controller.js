@@ -379,7 +379,7 @@ async function uploadProductImage(req, res) {
     return res.status(400).json({ error: 'Only image uploads are allowed' })
   }
 
-  const folder = String(process.env.CLOUDINARY_PRODUCTS_FOLDER ?? 'bills-can/products').trim() || 'bills-can/products'
+  const folder = String(process.env.CLOUDINARY_PRODUCTS_FOLDER ?? 'kounter/products').trim() || 'kounter/products'
 
   try {
     const cloudinary = getCloudinaryV2()

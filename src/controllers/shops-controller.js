@@ -33,7 +33,7 @@ async function createShop(req, res) {
   const shop = await Shop.create({
     name,
     currency: currency ?? 'NGN',
-    businessName: businessName ?? 'ScanSell POS',
+    businessName: businessName ?? 'Kounter',
     businessLogoUrl: businessLogoUrl ?? null,
     address: address ?? null,
     phone: phone ?? null,

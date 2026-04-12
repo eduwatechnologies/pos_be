@@ -1,5 +1,5 @@
 {
-  "name": "bills-can-backend",
+  "name": "kounter-backend",
   "version": "0.1.0",
   "private": true,
   "main": "src/server.js",
