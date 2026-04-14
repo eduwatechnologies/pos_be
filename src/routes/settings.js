@@ -6,7 +6,7 @@ const settingsController = require('../controllers/settings-controller')
 
 const settingsRouter = express.Router({ mergeParams: true })
 
-settingsRouter.get('/', requireAuth, requireShopAccess, requireShopPermission('settings'), settingsController.getSettings)
+settingsRouter.get('/', requireAuth, requireShopAccess, settingsController.getSettings)
 
 settingsRouter.patch('/', requireAuth, requireShopAccess, requireShopPermission('settings'), settingsController.updateSettings)
 

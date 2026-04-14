@@ -24,6 +24,16 @@ function normalizeRolePermissions(input) {
       employees: false,
       settings: false,
     },
+    manager: {
+      dashboard: true,
+      terminal: true,
+      customers: true,
+      receipts: true,
+      analytics: true,
+      inventory: true,
+      employees: true,
+      settings: false,
+    },
   }
 
   const allowedKeys = ['dashboard', 'terminal', 'customers', 'receipts', 'analytics', 'inventory', 'employees', 'settings']
@@ -36,7 +46,7 @@ function normalizeRolePermissions(input) {
     if (role === 'admin') continue
     if (role === 'super_admin') continue
 
-    const base = role === 'cashier' ? { ...defaults.cashier } : Object.fromEntries(allowedKeys.map((k) => [k, true]))
+    const base = role === 'cashier' ? { ...defaults.cashier } : role === 'manager' ? { ...defaults.manager } : Object.fromEntries(allowedKeys.map((k) => [k, true]))
     for (const key of allowedKeys) {
       if (key in roleObj) base[key] = Boolean(roleObj[key])
     }
@@ -44,6 +54,7 @@ function normalizeRolePermissions(input) {
   }
 
   out.cashier = { ...defaults.cashier, ...(out.cashier ?? {}) }
+  out.manager = { ...defaults.manager, ...(out.manager ?? {}) }
   out.admin = { ...defaults.admin }
 
   return out
@@ -129,6 +140,10 @@ function requireShopPermission(permissionKey) {
 
     const rolePermissions = normalizeRolePermissions(shop?.rolePermissions)
     const roleKey = String(user.role ?? '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '_')
+      .replace(/[^a-z0-9_]/g, '')
     const allowed = keys.some((k) => Boolean(rolePermissions?.[roleKey]?.[k]))
 
     if (!allowed) {
@@ -139,4 +154,4 @@ function requireShopPermission(permissionKey) {
   }
 }
 
-module.exports = { requireShopAccess, requireShopPermission }
+module.exports = { requireShopAccess, requireShopPermission, normalizeRolePermissions }

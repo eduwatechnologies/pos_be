@@ -3,6 +3,7 @@ const { hashPassword } = require('../utils/password')
 const { Shop } = require('../schemas/shop')
 const { StoreSubscription } = require('../schemas/store-subscription')
 const { SubscriptionPlan } = require('../schemas/subscription-plan')
+const { normalizeRolePermissions } = require('../utils/require-shop-access')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 const protectedRoles = ['admin', 'super_admin']
@@ -44,8 +45,8 @@ async function createEmployee(req, res) {
     return res.status(404).json({ error: 'Not found' })
   }
 
-  const rolePermissions = shop?.rolePermissions && typeof shop.rolePermissions === 'object' ? shop.rolePermissions : {}
-  const requestedRole = role ? String(role) : 'cashier'
+  const rolePermissions = normalizeRolePermissions(shop?.rolePermissions)
+  const requestedRole = role ? String(role).trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : 'cashier'
   if (protectedRoles.includes(requestedRole)) {
     return res.status(400).json({ error: 'Invalid role' })
   }
@@ -171,8 +172,8 @@ async function updateEmployee(req, res) {
       return res.status(404).json({ error: 'Not found' })
     }
 
-    const rolePermissions = shop?.rolePermissions && typeof shop.rolePermissions === 'object' ? shop.rolePermissions : {}
-    const requestedRole = updates.role ? String(updates.role) : ''
+    const rolePermissions = normalizeRolePermissions(shop?.rolePermissions)
+    const requestedRole = updates.role ? String(updates.role).trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '') : ''
     if (!requestedRole || protectedRoles.includes(requestedRole) || !(requestedRole in rolePermissions)) {
       return res.status(400).json({ error: 'Invalid role' })
     }

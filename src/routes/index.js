@@ -18,6 +18,7 @@ const { supplierBillsRouter } = require('./supplier-bills')
 const { expensesRouter } = require('./expenses')
 const { auditRouter } = require('./audit')
 const { reportsRouter } = require('./reports')
+const { storefrontRouter } = require('./storefront')
 
 const apiRouter = express.Router()
 
@@ -37,6 +38,7 @@ apiRouter.use('/shops/:shopId/reports', reportsRouter)
 apiRouter.use('/shops/:shopId/settings', settingsRouter)
 apiRouter.use('/shops/:shopId/audit-logs', auditRouter)
 apiRouter.use('/shops/:shopId/billing', shopBillingRouter)
+apiRouter.use('/shops/:shopId/storefront', storefrontRouter)
 apiRouter.use('/users', usersRouter)
 apiRouter.use('/billing', billingRouter)
 

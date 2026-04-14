@@ -6,12 +6,11 @@ const billingController = require('../controllers/billing-controller')
 
 const shopBillingRouter = express.Router({ mergeParams: true })
 
-shopBillingRouter.get('/plans', requireAuth, requireShopAccess, requireShopPermission('settings'), billingController.listShopPlans)
+shopBillingRouter.get('/plans', requireAuth, requireShopAccess, billingController.listShopPlans)
 shopBillingRouter.get(
   '/subscription',
   requireAuth,
   requireShopAccess,
-  requireShopPermission('settings'),
   billingController.getShopSubscription,
 )
 shopBillingRouter.post(

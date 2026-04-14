@@ -49,10 +49,10 @@ async function bootstrap() {
     mongoUri: process.env.MONGODB_URI,
   })
 
-  if (shouldSeedAdmin) {
-    await seedAdminUser()
-    return
-  }
+  // if (shouldSeedAdmin) {
+  //   await seedAdminUser()
+  //   return
+  // }
 
   const intervalMs = Number(process.env.SUBSCRIPTION_MAINTENANCE_INTERVAL_MS ?? 6 * 60 * 60 * 1000)
   await runSubscriptionMaintenance()
