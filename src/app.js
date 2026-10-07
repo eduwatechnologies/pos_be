@@ -16,10 +16,12 @@ function createApp() {
     .filter(Boolean)
 
   const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'http://localhost:3002',
+    // 'http://localhost:3000',
+    // 'http://localhost:3001',
+    // 'http://localhost:3002',
     'https://pos-admin-mauve.vercel.app',
+    'https://posstorefront.vercel.app',
+    "https://pos-super-admin-pi.vercel.app",
     'https://www.kounter.ng',
     ...configuredOrigins,
   ]
