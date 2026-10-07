@@ -18,7 +18,7 @@ function createApp() {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://pos-admin-mauve.vercel.app/auth/login',
+    'https://pos-admin-mauve.vercel.app',
     'https://www.kounter.ng',
     ...configuredOrigins,
   ]
