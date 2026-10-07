@@ -10,12 +10,18 @@ const { notFoundHandler, errorHandler } = require('./utils/http-errors')
 function createApp() {
   const app = express()
 
+  const configuredOrigins = (process.env.ALLOWED_ORIGINS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
     'https://possuperadmin-production.up.railway.app',
     'https://posadmin-production.up.railway.app',
-    'https://www.kounter.ng'
+    'https://www.kounter.ng',
+    ...configuredOrigins,
   ]
   const corsOptions = {
     origin: (origin, callback) => {
