@@ -2,6 +2,15 @@ const { Shop } = require('../schemas/shop')
 const { User } = require('../schemas/user')
 const { normalizeRolePermissions } = require('../utils/require-shop-access')
 
+function normalizeStorefrontSlug(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60)
+}
+
 function normalizeRoleKey(input) {
   return String(input ?? '')
     .trim()
@@ -40,6 +49,13 @@ async function getSettings(req, res) {
       phone: shop.phone,
       taxRateBps: typeof shop.taxRateBps === 'number' && Number.isFinite(shop.taxRateBps) ? shop.taxRateBps : 0,
       allowNegativeStock: shop.allowNegativeStock === true,
+      storefrontEnabled: shop.storefrontEnabled === true,
+      storefrontSlug: shop.storefrontSlug ?? null,
+      storefrontDescription: shop.storefrontDescription ?? null,
+      storefrontPrimaryColor: shop.storefrontPrimaryColor ?? '#0f172a',
+      storefrontBannerUrl: shop.storefrontBannerUrl ?? null,
+      storefrontDeliveryFeeCents: Number(shop.storefrontDeliveryFeeCents ?? 0),
+      storefrontPickupOnly: shop.storefrontPickupOnly !== false,
       rolePermissions: normalizeRolePermissions(shop.rolePermissions),
     },
   })
@@ -58,9 +74,28 @@ async function updateSettings(req, res) {
     'rolePermissions',
     'taxRateBps',
     'allowNegativeStock',
+    'storefrontEnabled',
+    'storefrontSlug',
+    'storefrontDescription',
+    'storefrontPrimaryColor',
+    'storefrontBannerUrl',
+    'storefrontDeliveryFeeCents',
+    'storefrontPickupOnly',
   ]
   for (const key of allowed) {
     if (key in (req.body ?? {})) updates[key] = req.body[key]
+  }
+
+  if ('storefrontSlug' in updates) {
+    const slug = normalizeStorefrontSlug(updates.storefrontSlug)
+    if (!slug && updates.storefrontSlug !== null && updates.storefrontSlug !== undefined && updates.storefrontSlug !== '') {
+      return res.status(400).json({ error: 'storefrontSlug must contain letters or numbers' })
+    }
+    if (slug) {
+      const conflict = await Shop.findOne({ storefrontSlug: slug, _id: { $ne: shopId } }).select({ _id: 1 }).lean()
+      if (conflict) return res.status(409).json({ error: 'storefrontSlug already taken' })
+    }
+    updates.storefrontSlug = slug || null
   }
 
   if ('rolePermissions' in updates) {
@@ -75,6 +110,19 @@ async function updateSettings(req, res) {
   }
   if ('allowNegativeStock' in updates) {
     updates.allowNegativeStock = updates.allowNegativeStock === true
+  }
+  if ('storefrontEnabled' in updates) {
+    updates.storefrontEnabled = updates.storefrontEnabled === true
+  }
+  if ('storefrontDeliveryFeeCents' in updates) {
+    const fee = Number(updates.storefrontDeliveryFeeCents)
+    if (!Number.isFinite(fee) || fee < 0 || fee > 1000000) {
+      return res.status(400).json({ error: 'storefrontDeliveryFeeCents must be between 0 and 1000000' })
+    }
+    updates.storefrontDeliveryFeeCents = Math.round(fee)
+  }
+  if ('storefrontPickupOnly' in updates) {
+    updates.storefrontPickupOnly = updates.storefrontPickupOnly !== false
   }
 
   const shop = await Shop.findByIdAndUpdate(shopId, { $set: updates }, { new: true }).lean()
@@ -93,6 +141,13 @@ async function updateSettings(req, res) {
       phone: shop.phone,
       taxRateBps: typeof shop.taxRateBps === 'number' && Number.isFinite(shop.taxRateBps) ? shop.taxRateBps : 0,
       allowNegativeStock: shop.allowNegativeStock === true,
+      storefrontEnabled: shop.storefrontEnabled === true,
+      storefrontSlug: shop.storefrontSlug ?? null,
+      storefrontDescription: shop.storefrontDescription ?? null,
+      storefrontPrimaryColor: shop.storefrontPrimaryColor ?? '#0f172a',
+      storefrontBannerUrl: shop.storefrontBannerUrl ?? null,
+      storefrontDeliveryFeeCents: Number(shop.storefrontDeliveryFeeCents ?? 0),
+      storefrontPickupOnly: shop.storefrontPickupOnly !== false,
       rolePermissions: normalizeRolePermissions(shop.rolePermissions),
     },
   })

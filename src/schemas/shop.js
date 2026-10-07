@@ -8,6 +8,13 @@ const shopSchema = new mongoose.Schema(
     businessLogoUrl: { type: String, default: null },
     address: { type: String, default: null },
     phone: { type: String, default: null },
+    storefrontEnabled: { type: Boolean, default: false },
+    storefrontSlug: { type: String, default: null, trim: true },
+    storefrontDescription: { type: String, default: null },
+    storefrontPrimaryColor: { type: String, default: '#0f172a' },
+    storefrontBannerUrl: { type: String, default: null },
+    storefrontDeliveryFeeCents: { type: Number, default: 0, min: 0 },
+    storefrontPickupOnly: { type: Boolean, default: true },
     taxRateBps: { type: Number, default: 800, min: 0, max: 10000 },
     allowNegativeStock: { type: Boolean, default: false },
     rolePermissions: {

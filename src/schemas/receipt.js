@@ -14,11 +14,19 @@ const receiptItemSchema = new mongoose.Schema(
 const receiptSchema = new mongoose.Schema(
   {
     shopId: { type: String, required: true, index: true },
-    cashierUserId: { type: String, required: true, index: true },
+    cashierUserId: { type: String, default: null, index: true },
     customerId: { type: String, default: null, index: true },
     customerName: { type: String, default: null },
+    customerPhone: { type: String, default: null },
+    customerEmail: { type: String, default: null },
     paymentMethod: { type: String, required: true, enum: ['cash', 'card', 'transfer', 'other'] },
+    source: { type: String, default: 'pos', enum: ['pos', 'online', 'manual'] },
     status: { type: String, required: true, enum: ['paid', 'refunded'], default: 'paid' },
+    orderStatus: {
+      type: String,
+      default: 'pending',
+      enum: ['pending', 'confirmed', 'preparing', 'ready_for_pickup', 'completed', 'canceled'],
+    },
     items: { type: [receiptItemSchema], default: [] },
     subtotalCents: { type: Number, required: true, min: 0 },
     discountCents: { type: Number, required: true, min: 0, default: 0 },
@@ -27,6 +35,7 @@ const receiptSchema = new mongoose.Schema(
     paidAt: { type: Date, required: true, default: Date.now, index: true },
     refundedAt: { type: Date, default: null },
     refundReason: { type: String, default: null },
+    notes: { type: String, default: null },
   },
   { timestamps: true },
 )

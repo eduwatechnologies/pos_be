@@ -5,30 +5,217 @@ const { Product } = require('../schemas/product')
 const { Shop } = require('../schemas/shop')
 const { requireAuth } = require('../utils/require-auth')
 
-const storefrontRouter = express.Router()
+const storefrontRouter = express.Router({ mergeParams: true })
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
+const validOrderStatuses = ['pending', 'confirmed', 'preparing', 'ready_for_pickup', 'completed', 'canceled']
+
+async function resolveShopRef(ref) {
+  const raw = String(ref ?? '').trim()
+  if (!raw) return null
+  if (objectIdRe.test(raw)) {
+    const byId = await Shop.findById(raw).lean()
+    if (byId) return byId
+  }
+  return await Shop.findOne({ storefrontSlug: raw }).lean()
+}
+
+function serializeProductForPublic(product) {
+  return {
+    id: String(product._id),
+    name: product.name,
+    category: product.category ?? 'General',
+    description: product.description ?? null,
+    imageUrl: product.imageUrl ?? null,
+    priceCents: Number(product.priceCents ?? 0),
+    stockQty: Number(product.stockQty ?? 0),
+    lowStockThreshold: Number(product.lowStockThreshold ?? 0),
+    sku: product.sku ?? null,
+    barcode: product.barcode ?? null,
+    isActive: product.isActive !== false,
+  }
+}
+
+async function getPublicStorefront(req, res) {
+  const shop = await resolveShopRef(req.params.shopId)
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+
+  if (shop.storefrontEnabled !== true) {
+    return res.status(403).json({ error: 'Storefront is disabled' })
+  }
+
+  const shopId = String(shop._id)
+  const products = await Product.find({ shopId, isActive: true }).sort({ createdAt: -1 }).lean()
+
+  return res.status(200).json({
+    shop: {
+      id: shopId,
+      name: shop.name,
+      currency: shop.currency ?? 'NGN',
+      businessName: shop.businessName ?? 'Kounter',
+      businessLogoUrl: shop.businessLogoUrl ?? null,
+      address: shop.address ?? null,
+      phone: shop.phone ?? null,
+      storefrontEnabled: true,
+      storefrontSlug: shop.storefrontSlug ?? null,
+      storefrontDescription: shop.storefrontDescription ?? null,
+      storefrontPrimaryColor: shop.storefrontPrimaryColor ?? '#0f172a',
+      storefrontBannerUrl: shop.storefrontBannerUrl ?? null,
+      storefrontDeliveryFeeCents: Number(shop.storefrontDeliveryFeeCents ?? 0),
+      storefrontPickupOnly: shop.storefrontPickupOnly !== false,
+    },
+    products: products.map(serializeProductForPublic),
+  })
+}
+
+async function listPublicProducts(req, res) {
+  const shop = await resolveShopRef(req.params.shopId)
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+
+  if (shop.storefrontEnabled !== true) {
+    return res.status(403).json({ error: 'Storefront is disabled' })
+  }
+
+  const shopId = String(shop._id)
+  const products = await Product.find({ shopId, isActive: true }).sort({ createdAt: -1 }).lean()
+  return res.status(200).json({
+    products: products.map(serializeProductForPublic),
+  })
+}
+
+function serializeOrderForAdmin(receipt) {
+  const id = String(receipt._id)
+  return {
+    id,
+    orderId: id,
+    orderNumber: `ORD-${id.slice(-8).toUpperCase()}`,
+    customerName: receipt.customerName ?? null,
+    customerPhone: receipt.customerPhone ?? null,
+    customerEmail: receipt.customerEmail ?? null,
+    paymentMethod: receipt.paymentMethod ?? 'cash',
+    status: receipt.status ?? 'paid',
+    orderStatus: receipt.orderStatus ?? 'pending',
+    totalCents: Number(receipt.totalCents ?? 0),
+    subtotalCents: Number(receipt.subtotalCents ?? 0),
+    taxCents: Number(receipt.taxCents ?? 0),
+    createdAt: receipt.createdAt ?? receipt.paidAt ?? new Date().toISOString(),
+    paidAt: receipt.paidAt ?? receipt.createdAt ?? new Date().toISOString(),
+    notes: receipt.notes ?? null,
+    items: Array.isArray(receipt.items)
+      ? receipt.items.map((item) => ({
+          productId: item.productId ? String(item.productId) : null,
+          name: item.name,
+          qty: Number(item.qty ?? 0),
+          unitPriceCents: Number(item.unitPriceCents ?? 0),
+          lineTotalCents: Number(item.lineTotalCents ?? 0),
+        }))
+      : [],
+  }
+}
+
+async function listOnlineOrders(req, res) {
+  const shop = await resolveShopRef(req.params.shopId)
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+  const shopId = String(shop._id)
+
+  const filter = { shopId, source: 'online' }
+
+  const status = String(req.query?.orderStatus ?? req.query?.status ?? '').trim()
+  if (validOrderStatuses.includes(status)) {
+    filter.orderStatus = status
+  }
+
+  const q = String(req.query?.q ?? '').trim()
+  if (q) {
+    const regex = { $regex: q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' }
+    const clauses = [
+      { customerName: regex },
+      { customerPhone: regex },
+      { customerEmail: regex },
+    ]
+    if (objectIdRe.test(q)) clauses.push({ _id: q })
+    filter.$or = clauses
+  }
+
+  const orders = await Receipt.find(filter).sort({ createdAt: -1 }).lean()
+  return res.status(200).json({ items: orders.map(serializeOrderForAdmin) })
+}
+
+async function getOnlineOrder(req, res) {
+  const { shopId: shopRef, orderId } = req.params
+  if (!objectIdRe.test(orderId)) {
+    return res.status(400).json({ error: 'Invalid orderId' })
+  }
+  const shop = await resolveShopRef(shopRef)
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+  const shopId = String(shop._id)
+
+  const order = await Receipt.findOne({ _id: orderId, shopId, source: 'online' }).lean()
+  if (!order) {
+    return res.status(404).json({ error: 'Order not found' })
+  }
+
+  return res.status(200).json({ item: serializeOrderForAdmin(order) })
+}
+
+async function updateOnlineOrderStatus(req, res) {
+  const { shopId: shopRef, orderId } = req.params
+  const { orderStatus } = req.body ?? {}
+  if (!objectIdRe.test(orderId)) {
+    return res.status(400).json({ error: 'Invalid orderId' })
+  }
+  if (!validOrderStatuses.includes(String(orderStatus ?? ''))) {
+    return res.status(400).json({ error: 'Invalid orderStatus' })
+  }
+  const shop = await resolveShopRef(shopRef)
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
+  }
+  const shopId = String(shop._id)
+
+  const order = await Receipt.findOneAndUpdate(
+    { _id: orderId, shopId, source: 'online' },
+    { $set: { orderStatus: String(orderStatus) } },
+    { new: true },
+  ).lean()
+
+  if (!order) {
+    return res.status(404).json({ error: 'Order not found' })
+  }
+
+  return res.status(200).json({ item: serializeOrderForAdmin(order) })
+}
 
 async function createOnlineOrder(req, res) {
-  const shopId = req.params.shopId
-  const { items, customerName, customerEmail, customerPhone, paymentMethod } = req.body ?? {}
+  const shop = await resolveShopRef(req.params.shopId)
+  const { items, customerName, customerEmail, customerPhone, paymentMethod, notes } = req.body ?? {}
 
-  if (!objectIdRe.test(shopId)) {
-    return res.status(400).json({ error: 'Invalid shopId' })
+  if (!shop) {
+    return res.status(404).json({ error: 'Shop not found' })
   }
+  const shopId = String(shop._id)
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'items are required' })
   }
+
+  const normalizedNotes = String(notes ?? '').trim().slice(0, 1000) || null
 
   const normalizedPaymentMethod = String(paymentMethod ?? 'cash').trim().toLowerCase()
   if (!['cash', 'card', 'transfer', 'other'].includes(normalizedPaymentMethod)) {
     return res.status(400).json({ error: 'Invalid paymentMethod' })
   }
 
-  const shop = await Shop.findById(shopId).lean()
-  if (!shop) {
-    return res.status(404).json({ error: 'Shop not found' })
+  if (shop.storefrontEnabled !== true) {
+    return res.status(403).json({ error: 'Storefront is disabled' })
   }
 
   const incomingItems = items.slice(0, 200)
@@ -43,6 +230,9 @@ async function createOnlineOrder(req, res) {
     const qty = Number(raw?.qty ?? 0)
     if (!Number.isFinite(qty) || qty <= 0) {
       return res.status(400).json({ error: 'Each item must have qty >= 1' })
+    }
+    if (qty > 999) {
+      return res.status(400).json({ error: 'Each item qty must be <= 999' })
     }
 
     const productId = raw?.productId ? String(raw.productId) : null
@@ -131,14 +321,18 @@ async function createOnlineOrder(req, res) {
     cashierUserId: null,
     customerId,
     customerName: normalizedName,
+    customerPhone: normalizedPhone || null,
+    customerEmail: normalizedEmail || null,
     paymentMethod: normalizedPaymentMethod,
     items: normalizedItems,
     subtotalCents,
     taxCents,
     discountCents,
     totalCents,
-    status: 'completed',
+    status: 'paid',
     source: 'online',
+    orderStatus: 'pending',
+    notes: normalizedNotes,
     paidAt: new Date(),
   }
 
@@ -157,6 +351,11 @@ async function createOnlineOrder(req, res) {
   })
 }
 
-storefrontRouter.post('/:shopId/orders', createOnlineOrder)
+storefrontRouter.get('/', getPublicStorefront)
+storefrontRouter.get('/products', listPublicProducts)
+storefrontRouter.get('/orders', requireAuth, listOnlineOrders)
+storefrontRouter.get('/orders/:orderId', requireAuth, getOnlineOrder)
+storefrontRouter.patch('/orders/:orderId/status', requireAuth, updateOnlineOrderStatus)
+storefrontRouter.post('/orders', createOnlineOrder)
 
 module.exports = { storefrontRouter }
