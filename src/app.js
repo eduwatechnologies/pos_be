@@ -18,8 +18,7 @@ function createApp() {
   const allowedOrigins = [
     'http://localhost:3000',
     'http://localhost:3001',
-    'https://possuperadmin-production.up.railway.app',
-    'https://posadmin-production.up.railway.app',
+    'https://pos-admin-mauve.vercel.app/auth/login',
     'https://www.kounter.ng',
     ...configuredOrigins,
   ]
