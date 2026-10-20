@@ -18,9 +18,14 @@ async function requireAuth(req, res, next) {
       return res.status(401).json({ error: 'Unauthorized' })
     }
 
-    const user = await User.findById(userId).select({ email: 1, name: 1, role: 1, shopIds: 1, isActive: 1 }).lean()
+    const user = await User.findById(userId)
+      .select({ email: 1, name: 1, role: 1, shopIds: 1, isActive: 1, authVersion: 1 })
+      .lean()
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized' })
+    }
+    if (Number(payload?.authVersion ?? 0) !== Number(user.authVersion ?? 0)) {
+      return res.status(401).json({ error: 'Session expired' })
     }
     if (user.isActive === false) {
       return res.status(403).json({ error: 'Account disabled' })

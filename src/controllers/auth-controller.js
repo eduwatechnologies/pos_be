@@ -6,6 +6,7 @@ const { SubscriptionPlan } = require('../schemas/subscription-plan')
 const { StoreSubscription } = require('../schemas/store-subscription')
 const { hashPassword, verifyPassword } = require('../utils/password')
 const { requireEnv } = require('../utils/require-env')
+const { logAudit } = require('../utils/audit-log')
 
 async function ensureTrialPlan() {
   const existing = await SubscriptionPlan.findOne({ code: 'trial' }).lean()
@@ -84,7 +85,7 @@ async function register(req, res) {
 
     const jwtSecret = requireEnv('JWT_SECRET')
     const token = jwt.sign(
-      { sub: String(user._id), role: user.role, shopIds: user.shopIds },
+      { sub: String(user._id), role: user.role, shopIds: user.shopIds, authVersion: user.authVersion ?? 0 },
       jwtSecret,
       { expiresIn: '7d' },
     )
@@ -138,7 +139,7 @@ async function login(req, res) {
 
   const jwtSecret = requireEnv('JWT_SECRET')
   const token = jwt.sign(
-    { sub: String(user._id), role: user.role, shopIds: user.shopIds },
+    { sub: String(user._id), role: user.role, shopIds: user.shopIds, authVersion: user.authVersion ?? 0 },
     jwtSecret,
     { expiresIn: '7d' },
   )
@@ -174,4 +175,42 @@ async function me(req, res) {
   })
 }
 
-module.exports = { register, login, me }
+async function adminResetPassword(req, res) {
+  if (!['admin', 'super_admin'].includes(req.user?.role)) {
+    return res.status(403).json({ error: 'Only admins can reset account passwords' })
+  }
+
+  const normalizedEmail = String(req.body?.email ?? '').toLowerCase().trim()
+  const password = typeof req.body?.password === 'string' ? req.body.password : ''
+  if (!normalizedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return res.status(400).json({ error: 'A valid email is required' })
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' })
+  }
+
+  const passwordHash = await hashPassword(password)
+  const updated = await User.findOneAndUpdate(
+    { email: normalizedEmail },
+    { $set: { passwordHash }, $inc: { authVersion: 1 } },
+    { new: true },
+  )
+    .select({ _id: 1 })
+    .lean()
+
+  if (!updated) {
+    return res.status(404).json({ error: 'No account found for that email' })
+  }
+
+  await logAudit(req, {
+    shopId: req.user.shopIds?.[0] ?? 'global',
+    action: 'password_reset',
+    entityType: 'user',
+    entityId: updated._id,
+    metadata: { targetEmail: normalizedEmail },
+  })
+
+  return res.status(200).json({ ok: true })
+}
+
+module.exports = { register, login, me, adminResetPassword }
