@@ -32,6 +32,34 @@ async function revenue(req, res) {
   })
 }
 
+async function salesTrend(req, res) {
+  const shopId = req.params.shopId
+  const from = String(req.query.from ?? '').trim()
+  const to = String(req.query.to ?? '').trim()
+
+  const match = { shopId, status: 'paid' }
+  if (from || to) {
+    match.paidAt = {}
+    if (from) match.paidAt.$gte = new Date(from)
+    if (to) match.paidAt.$lte = new Date(to)
+  }
+
+  const items = await Receipt.aggregate([
+    { $match: match },
+    {
+      $group: {
+        _id: { $dateToString: { format: '%Y-%m', date: '$paidAt' } },
+        totalSalesCents: { $sum: '$totalCents' },
+        transactions: { $sum: 1 },
+      },
+    },
+    { $sort: { _id: 1 } },
+    { $project: { _id: 0, month: '$_id', totalSalesCents: 1, transactions: 1 } },
+  ])
+
+  res.status(200).json({ items })
+}
+
 async function bestSellers(req, res) {
   const shopId = req.params.shopId
   const from = String(req.query.from ?? '').trim()
@@ -119,5 +147,5 @@ async function employeePerformance(req, res) {
   res.status(200).json({ items })
 }
 
-module.exports = { revenue, bestSellers, paymentBreakdown, employeePerformance }
+module.exports = { revenue, salesTrend, bestSellers, paymentBreakdown, employeePerformance }
 

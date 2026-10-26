@@ -1,4 +1,4 @@
-const mongoose = require('mongoose')
+﻿const mongoose = require('mongoose')
 
 const shopSchema = new mongoose.Schema(
   {
@@ -8,6 +8,7 @@ const shopSchema = new mongoose.Schema(
     businessLogoUrl: { type: String, default: null },
     address: { type: String, default: null },
     phone: { type: String, default: null },
+    email: { type: String, default: null, trim: true },
     storefrontEnabled: { type: Boolean, default: false },
     storefrontSlug: { type: String, default: null, trim: true },
     storefrontDescription: { type: String, default: null },
@@ -49,4 +50,3 @@ const shopSchema = new mongoose.Schema(
 const Shop = mongoose.models.Shop ?? mongoose.model('Shop', shopSchema)
 
 module.exports = { Shop }
-

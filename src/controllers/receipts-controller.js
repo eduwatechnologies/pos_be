@@ -1,10 +1,12 @@
-const mongoose = require('mongoose')
+﻿const mongoose = require('mongoose')
 const { Receipt } = require('../schemas/receipt')
 const { Product } = require('../schemas/product')
 const { Shop } = require('../schemas/shop')
 const { StockMovement } = require('../schemas/stock-movement')
 const { Customer } = require('../schemas/customer')
 const { logAudit } = require('../utils/audit-log')
+const { sendOrderConfirmation } = require('../services/email-service')
+
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
 
@@ -266,6 +268,28 @@ async function createReceipt(req, res) {
     metadata: { totalCents, paymentMethod, itemCount: normalizedItems.length },
   })
 
+  try {
+    if (normalizedCustomerId) {
+      const { Customer } = require('../schemas/customer')
+      const customer = await Customer.findById(normalizedCustomerId).lean()
+      if (customer && customer.email) {
+        const { Shop } = require('../schemas/shop')
+        const shop = await Shop.findById(shopId).select({ name: 1 }).lean()
+        const { sendOrderConfirmation } = require('../services/email-service')
+        sendOrderConfirmation({
+          to: customer.email,
+          orderDetails: {
+            orderNumber: String(receipt._id).slice(-8).toUpperCase(),
+            customerName: customer.name || customerName || 'Customer',
+            items: normalizedItems,
+            totalCents,
+            shopName: shop && shop.name ? shop.name : 'Kounter',
+          },
+        }).catch(function(){})
+      }
+    }
+  } catch (e) {}
+
   res.status(201).json({ item: receipt })
 }
 
@@ -347,3 +371,7 @@ async function refundReceipt(req, res) {
 }
 
 module.exports = { listReceipts, createReceipt, getReceipt, refundReceipt }
+
+
+
+

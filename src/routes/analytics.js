@@ -8,6 +8,8 @@ const analyticsRouter = express.Router({ mergeParams: true })
 
 analyticsRouter.get('/revenue', requireAuth, requireShopAccess, requireShopPermission('analytics'), analyticsController.revenue)
 
+analyticsRouter.get('/sales-trend', requireAuth, requireShopAccess, requireShopPermission('analytics'), analyticsController.salesTrend)
+
 analyticsRouter.get('/best-sellers', requireAuth, requireShopAccess, requireShopPermission('analytics'), analyticsController.bestSellers)
 
 analyticsRouter.get('/payment-breakdown', requireAuth, requireShopAccess, requireShopPermission('analytics'), analyticsController.paymentBreakdown)

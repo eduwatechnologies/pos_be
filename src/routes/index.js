@@ -1,4 +1,4 @@
-const express = require('express')
+﻿const express = require('express')
 
 const { authRouter } = require('./auth')
 const { shopsRouter } = require('./shops')
@@ -19,6 +19,7 @@ const { expensesRouter } = require('./expenses')
 const { auditRouter } = require('./audit')
 const { reportsRouter } = require('./reports')
 const { storefrontRouter } = require('./storefront')
+const { notificationsRouter } = require('./notifications')
 
 const apiRouter = express.Router()
 
@@ -40,6 +41,8 @@ apiRouter.use('/shops/:shopId/audit-logs', auditRouter)
 apiRouter.use('/shops/:shopId/billing', shopBillingRouter)
 apiRouter.use('/shops/:shopId/storefront', storefrontRouter)
 apiRouter.use('/users', usersRouter)
+apiRouter.use('/notifications', notificationsRouter)
 apiRouter.use('/billing', billingRouter)
 
 module.exports = { apiRouter }
+

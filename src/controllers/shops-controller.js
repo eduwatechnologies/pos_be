@@ -1,3 +1,4 @@
+﻿const { sendNotification } = require('../services/email-service')
 const { Shop } = require('../schemas/shop')
 const { User } = require('../schemas/user')
 
@@ -75,7 +76,7 @@ async function updateShop(req, res) {
   }
 
   const updates = {}
-  const allowed = ['name', 'currency', 'businessName', 'businessLogoUrl', 'address', 'phone']
+  const allowed = ['name', 'currency', 'businessName', 'businessLogoUrl', 'address', 'phone', 'email']
   for (const key of allowed) {
     if (key in (req.body ?? {})) updates[key] = req.body[key]
   }
@@ -109,3 +110,5 @@ async function deleteShop(req, res) {
 }
 
 module.exports = { listShops, createShop, getShop, updateShop, deleteShop }
+
+

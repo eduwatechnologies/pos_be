@@ -1,9 +1,10 @@
-const { Product } = require('../schemas/product')
+﻿const { Product } = require('../schemas/product')
 const { Purchase } = require('../schemas/purchase')
 const { Shop } = require('../schemas/shop')
 const { Supplier } = require('../schemas/supplier')
 const { StockMovement } = require('../schemas/stock-movement')
 const { logAudit } = require('../utils/audit-log')
+const { sendLowStockAlert } = require('../services/email-service')
 const { requireEnv } = require('../utils/require-env')
 
 const objectIdRe = /^[0-9a-fA-F]{24}$/
@@ -129,8 +130,32 @@ async function getProduct(req, res) {
   if (!item) {
     return res.status(404).json({ error: 'Not found' })
   }
+  try {
+    if ('stockQty' in updates && typeof updates.stockQty === 'number') {
+      const newStock = Number(updates.stockQty)
+      const low = 'lowStockThreshold' in updates && typeof updates.lowStockThreshold === 'number' ? Number(updates.lowStockThreshold) : Number(item.lowStockThreshold || 0)
+      if (newStock <= low && low > 0) {
+        const { Shop } = require('../schemas/shop')
+        const shop = await Shop.findById(shopId).select({ name: 1, email: 1 }).lean()
+        if (shop && shop.email) {
+          const { sendLowStockAlert } = require('../services/email-service')
+          sendLowStockAlert({
+            to: shop.email,
+            productDetails: {
+              productName: item.name,
+              stockQty: newStock,
+              lowStockThreshold: low,
+              shopName: shop.name,
+            },
+          }).catch(function(){})
+        }
+      }
+    }
+  } catch (e) {}
+
   res.status(200).json({ item })
 }
+
 
 async function getProductDetail(req, res) {
   const shopId = req.params.shopId
@@ -275,8 +300,32 @@ async function updateProduct(req, res) {
     metadata: updates,
   })
 
+  try {
+    if ('stockQty' in updates && typeof updates.stockQty === 'number') {
+      const newStock = Number(updates.stockQty)
+      const low = 'lowStockThreshold' in updates && typeof updates.lowStockThreshold === 'number' ? Number(updates.lowStockThreshold) : Number(item.lowStockThreshold || 0)
+      if (newStock <= low && low > 0) {
+        const { Shop } = require('../schemas/shop')
+        const shop = await Shop.findById(shopId).select({ name: 1, email: 1 }).lean()
+        if (shop && shop.email) {
+          const { sendLowStockAlert } = require('../services/email-service')
+          sendLowStockAlert({
+            to: shop.email,
+            productDetails: {
+              productName: item.name,
+              stockQty: newStock,
+              lowStockThreshold: low,
+              shopName: shop.name,
+            },
+          }).catch(function(){})
+        }
+      }
+    }
+  } catch (e) {}
+
   res.status(200).json({ item })
 }
+
 
 async function deleteProduct(req, res) {
   const shopId = req.params.shopId
@@ -361,8 +410,32 @@ async function adjustStock(req, res) {
     })
   } catch {}
 
+  try {
+    if ('stockQty' in updates && typeof updates.stockQty === 'number') {
+      const newStock = Number(updates.stockQty)
+      const low = 'lowStockThreshold' in updates && typeof updates.lowStockThreshold === 'number' ? Number(updates.lowStockThreshold) : Number(item.lowStockThreshold || 0)
+      if (newStock <= low && low > 0) {
+        const { Shop } = require('../schemas/shop')
+        const shop = await Shop.findById(shopId).select({ name: 1, email: 1 }).lean()
+        if (shop && shop.email) {
+          const { sendLowStockAlert } = require('../services/email-service')
+          sendLowStockAlert({
+            to: shop.email,
+            productDetails: {
+              productName: item.name,
+              stockQty: newStock,
+              lowStockThreshold: low,
+              shopName: shop.name,
+            },
+          }).catch(function(){})
+        }
+      }
+    }
+  } catch (e) {}
+
   res.status(200).json({ item })
 }
+
 
 async function uploadProductImage(req, res) {
   ensureCloudinaryConfigured()
@@ -407,3 +480,5 @@ async function uploadProductImage(req, res) {
 }
 
 module.exports = { listProducts, createProduct, getProduct, getProductDetail, updateProduct, deleteProduct, adjustStock, uploadProductImage }
+
+
